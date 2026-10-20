@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=SC Hammer
+GenericName=Steam Controller Pairing
+Comment=Move, swap and pair your Steam Controller slots
+Exec=sc-hammer
+Icon=sc-hammer
+Categories=Settings;HardwareSettings;
+Keywords=steam;controller;puck;pairing;gamepad;
+Terminal=false

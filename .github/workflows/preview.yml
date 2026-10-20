@@ -1,0 +1,58 @@
+# Every push to main that changes the app builds an AppImage and puts it in a draft release called
+# "Preview build" (only people with write access can see drafts). Nothing is published; releasing is
+# a separate, deliberate step: the Release workflow.
+name: Preview build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "sc_hammer/**"
+      - "packaging/**"
+      - "tests/**"
+      - ".github/**"
+  workflow_dispatch:
+
+concurrency:
+  group: preview
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run the tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Install squashfs-tools
+        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
+
+      - name: Pick the preview version
+        run: |
+          base=$(python3 -c "import sc_hammer; print(sc_hammer.__version__)")
+          echo "VERSION=${base}-preview.$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - name: Build the AppImage
+        run: packaging/build-appimage.sh
+
+      - name: Write the notes
+        run: |
+          python3 .github/scripts/release_notes.py --preview --version "$VERSION" \
+            --appimage dist/SC-Hammer-$VERSION-x86_64.AppImage > notes.md
+
+      - name: Replace the preview draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName,isDraft,name \
+            --jq '.[] | select(.isDraft and .name == "Preview build") | .tagName' \
+            | while read -r tag; do gh release delete "$tag" --yes; done
+          gh release create preview --draft --target "$GITHUB_SHA" --title "Preview build" \
+            --notes-file notes.md dist/SC-Hammer-$VERSION-x86_64.AppImage

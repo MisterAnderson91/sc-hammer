@@ -1,0 +1,11 @@
+#!/bin/bash
+# AppImage entry point: the bundled Python (with Tk) runs the app.
+HERE="$(dirname "$(readlink -f "$0")")"
+APPDIR="${APPDIR:-$HERE}"
+export TCL_LIBRARY="$APPDIR/usr/share/tcltk/tcl8.6"
+export TK_LIBRARY="$APPDIR/usr/share/tcltk/tk8.6"
+export TKPATH="$TK_LIBRARY"
+export SSL_CERT_FILE="$APPDIR/opt/_internal/certs.pem"
+unset PYTHONHOME PYTHONPATH
+exec "$APPDIR/opt/python3.12/bin/python3.12" -s -E -B \
+	"$APPDIR/usr/share/sc-hammer/run.py" "$@"

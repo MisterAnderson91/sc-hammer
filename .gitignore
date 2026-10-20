@@ -1,0 +1,17 @@
+# Local-only: Claude Code files
+CLAUDE.md
+.claude/
+
+# Test output
+.pytest_cache/
+.coverage
+htmlcov/
+test-results/
+
+# Build output
+__pycache__/
+*.pyc
+build/
+dist/
+*.AppImage
+.DS_Store

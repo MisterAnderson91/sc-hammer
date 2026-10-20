@@ -1,0 +1,85 @@
+# Publishes a release when you ask for one: Actions → Release → Run workflow (or from a terminal:
+# gh workflow run release.yml -f bump=minor -f highlights="First point; second point").
+# Builds the AppImage from main, tags vX.Y.Z, writes the notes and removes the preview draft.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump since the last release"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      highlights:
+        description: "Highlights for the notes (optional; separate points with ;)"
+        type: string
+        required: false
+
+concurrency:
+  group: release
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run the tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Install squashfs-tools
+        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
+
+      - name: Work out the version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -z "$prev" ]; then
+            # First release: use the version in the code as-is.
+            version=$(python3 -c "import sc_hammer; print(sc_hammer.__version__)")
+          else
+            version=$(python3 - "$prev" "$BUMP" <<'PY'
+          import sys
+          major, minor, patch = (int(x) for x in sys.argv[1].lstrip("v").split("-")[0].split("."))
+          bump = sys.argv[2]
+          if bump == "major":
+              major, minor, patch = major + 1, 0, 0
+          elif bump == "minor":
+              minor, patch = minor + 1, 0
+          else:
+              patch += 1
+          print("%d.%d.%d" % (major, minor, patch))
+          PY
+          )
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "PREV_TAG=$prev" >> "$GITHUB_ENV"
+          echo "Releasing v$version (previous: ${prev:-none})"
+
+      - name: Build the AppImage
+        run: packaging/build-appimage.sh
+
+      - name: Write the notes
+        env:
+          HIGHLIGHTS: ${{ inputs.highlights }}
+        run: |
+          python3 .github/scripts/release_notes.py --version "$VERSION" ${PREV_TAG:+--prev-tag "$PREV_TAG"} \
+            --highlights "$HIGHLIGHTS" --appimage dist/SC-Hammer-$VERSION-x86_64.AppImage > notes.md
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "SC Hammer $VERSION" \
+            --notes-file notes.md dist/SC-Hammer-$VERSION-x86_64.AppImage
+          gh release list --limit 100 --json tagName,isDraft,name \
+            --jq '.[] | select(.isDraft and .name == "Preview build") | .tagName' \
+            | while read -r tag; do gh release delete "$tag" --yes; done
