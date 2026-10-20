@@ -2,7 +2,9 @@
 """Writes release notes (markdown) for a release or a preview build, to stdout.
 
 Lists the commits since the last release that touch the app itself (sc_hammer/, packaging/);
-README, docs and CI changes are left out. Adds install/upgrade steps and the AppImage checksum.
+README, docs and CI changes are left out. Every release in a series (e.g. 0.1.x) also gets the
+series summary from .github/release-notes/<series>.md and the notes of the earlier releases in that
+series (fetched with gh), then install/upgrade steps and checksums.
 
     release_notes.py --version 0.2.0 --asset dist/SC-Hammer-0.2.0-x86_64.AppImage \\
         --asset dist/SC-Hammer-0.2.0-windows-x64.exe \\
@@ -48,6 +50,37 @@ def app_commits(prev_tag):
         files = git("diff-tree", "--no-commit-id", "--name-only", "-r", "--root", sha).splitlines()
         if any(f.startswith(APP_PATHS) for f in files):
             out.append((sha[:7], subject.strip()))
+    return out
+
+
+def series_of(version):
+    return ".".join(version.split("-")[0].split(".")[:2])
+
+
+def _version_key(tag):
+    try:
+        return tuple(int(x) for x in tag.lstrip("v").split("-")[0].split("."))
+    except ValueError:
+        return ()
+
+
+def earlier_in_series(version):
+    """Notes of the published releases in the same x.y series before this one, newest first.
+    Each is (tag, its highlights and changes), with headings pushed down a level."""
+    series = series_of(version)
+    current = _version_key(version)
+    tags = [t for t in git("tag", "-l", "v%s.*" % series).splitlines()
+            if _version_key(t) and _version_key(t) < current]
+    out = []
+    for tag in sorted(tags, key=_version_key, reverse=True):
+        body = subprocess.run(["gh", "release", "view", tag, "--json", "body", "--jq", ".body"],
+                              capture_output=True, text=True).stdout
+        # Keep only that release's own highlights and changes.
+        for marker in ("## What's in", "## Earlier", "## Install"):
+            body = body.split(marker)[0]
+        body = body.strip()
+        if body:
+            out.append((tag, re.sub(r"(?m)^## ", "#### ", body)))
     return out
 
 
@@ -104,6 +137,16 @@ def main():
                 out += ["**%s**" % title, ""] + lines + [""]
     elif prev:
         out += ["No app changes since %s." % prev, ""]
+
+    series = series_of(args.version)
+    summary = os.path.join(os.path.dirname(__file__), "..", "release-notes", "%s.md" % series)
+    if os.path.exists(summary):
+        out += ["## What's in SC Hammer %s" % series, "", open(summary).read().strip(), ""]
+    earlier = [] if args.preview else earlier_in_series(args.version)
+    if earlier:
+        out += ["## Earlier %s releases" % series, ""]
+        for tag, body in earlier:
+            out += ["### %s" % tag, "", body, ""]
 
     out += ["## Install", ""]
     if appimage:

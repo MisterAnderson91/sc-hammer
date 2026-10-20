@@ -134,6 +134,7 @@ jobs:
       - name: Write the notes
         env:
           HIGHLIGHTS: ${{ inputs.highlights }}
+          GH_TOKEN: ${{ github.token }}  # to fetch the earlier releases' notes
         run: |
           python3 .github/scripts/release_notes.py --version "$VERSION" ${PREV_TAG:+--prev-tag "$PREV_TAG"} \
             --highlights "$HIGHLIGHTS" \
