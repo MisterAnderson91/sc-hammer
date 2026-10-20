@@ -181,6 +181,11 @@ class Scanner:
     def _scan_receiver(self, dev: UsbDevice, snap: Snapshot) -> None:
         infos = dev.command_ifaces()
         if not infos:
+            snap.problems.append(Problem(
+                "Found %s, but couldn't find its pairing interface" %
+                (dev.product or "a receiver"),
+                "Please report this: run SC Hammer with --diagnose and attach the "
+                "sc-hammer-diagnose.txt file it writes."))
             return
         ifaces = [self._open_iface(i.node) for i in infos]
         legacy = dev.bcd != 2

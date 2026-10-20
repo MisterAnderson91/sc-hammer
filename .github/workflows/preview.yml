@@ -87,6 +87,8 @@ jobs:
         run: |
           ./dist/SC-Hammer-$VERSION-windows-x64.exe --demo --list | tee out.txt
           grep -q "Steam Controller Puck" out.txt
+          ./dist/SC-Hammer-$VERSION-windows-x64.exe --diagnose | tee diag.txt
+          grep -q "Raw HID collections" diag.txt
       - uses: actions/upload-artifact@v7
         with:
           name: windows

@@ -163,6 +163,68 @@ def _caps(h) -> Optional[HIDP_CAPS]:
         _HidD_FreePreparsedData(pp)
 
 
+def _is_mouse_or_keyboard(c: dict) -> bool:
+    return c["usage_page"] == 0x01 and c["usage"] in (USAGE_MOUSE, USAGE_KEYBOARD)
+
+
+def _collections() -> List[dict]:
+    """Everything Windows reports about each Valve HID collection."""
+    out = []
+    for path in _hid_paths():
+        low = path.lower()
+        if "vid_28de" not in low:
+            continue
+        try:
+            h = _open(path, 0)  # query only: works even for collections Windows keeps for itself
+        except OSError:
+            continue
+        try:
+            attrs = HIDD_ATTRIBUTES()
+            attrs.Size = ctypes.sizeof(HIDD_ATTRIBUTES)
+            if not _HidD_GetAttributes(h, ctypes.byref(attrs)) or attrs.VendorID != VALVE_VID:
+                continue
+            caps = _caps(h)
+            serial = _string(_HidD_GetSerialNumberString, h)
+            product = _string(_HidD_GetProductString, h)
+        finally:
+            _CloseHandle(h)
+        if caps is None:
+            continue
+        mi = re.search(r"&mi_([0-9a-f]{2})", low)
+        col = re.search(r"&col([0-9a-f]{2})", low)
+        out.append({
+            "path": path, "pid": attrs.ProductID, "version": attrs.VersionNumber,
+            "serial": serial, "product": product,
+            "mi": int(mi.group(1), 16) if mi else 0, "col": int(col.group(1), 16) if col else 0,
+            "usage_page": caps.UsagePage, "usage": caps.Usage,
+            "input_len": caps.InputReportByteLength, "output_len": caps.OutputReportByteLength,
+            "feature_len": caps.FeatureReportByteLength,
+        })
+    return out
+
+
+def diagnose() -> List[str]:
+    """A plain-text dump of every Valve HID collection, for bug reports."""
+    lines = []
+    cols = _collections()
+    if not cols:
+        lines.append("No Valve (28DE) HID collections found. %d HID paths in total."
+                     % len(_hid_paths()))
+    for c in sorted(cols, key=lambda c: (c["pid"], c["serial"], c["mi"], c["col"])):
+        try:
+            WinHidIface(c["path"], c["feature_len"] or 64).close()
+            rw = "opens read/write"
+        except OSError as e:
+            rw = "can't open read/write (%s)" % e
+        lines.append("28de:%04x ver %04x serial %r product %r" %
+                     (c["pid"], c["version"], c["serial"], c["product"]))
+        lines.append("  interface %d collection %d  usage %04x:%04x  report bytes in %d out %d "
+                     "feature %d  %s" % (c["mi"], c["col"], c["usage_page"], c["usage"],
+                                          c["input_len"], c["output_len"], c["feature_len"], rw))
+        lines.append("  %s" % c["path"])
+    return lines
+
+
 class WinHidIface:
     def __init__(self, path: str, report_len: int):
         self.node = path
@@ -208,49 +270,34 @@ class WindowsTransport:
         return tuple(sorted(p for p in _hid_paths() if "vid_28de" in p.lower()))
 
     def enumerate(self) -> List[UsbDevice]:
+        # One USB interface can show up as several collections (e.g. a gamepad collection and a
+        # vendor collection carrying the feature reports). Like Linux, judge the interface by its
+        # first collection, and talk through the collection that has the feature reports.
         devices: Dict[tuple, UsbDevice] = {}
-        for path in _hid_paths():
-            low = path.lower()
-            if "vid_28de" not in low:
+        groups: Dict[tuple, List[dict]] = {}
+        for c in _collections():
+            key = (c["pid"], c["serial"] or c["path"])
+            if key not in devices:
+                devices[key] = UsbDevice(id=c["path"], vid=VALVE_VID, pid=c["pid"],
+                                         bcd=c["version"], serial=c["serial"],
+                                         product=c["product"])
+            groups.setdefault(key + (c["mi"],), []).append(c)
+        for gkey, cols in groups.items():
+            cols.sort(key=lambda c: c["col"])
+            first = cols[0]
+            cmd = next((c for c in cols if c["feature_len"] >= 4 and not _is_mouse_or_keyboard(c)),
+                       None)
+            if cmd is None:
                 continue
-            try:
-                h = _open(path, 0)  # query only: works even for collections Windows keeps for itself
-            except OSError:
-                continue
-            try:
-                attrs = HIDD_ATTRIBUTES()
-                attrs.Size = ctypes.sizeof(HIDD_ATTRIBUTES)
-                if not _HidD_GetAttributes(h, ctypes.byref(attrs)) or attrs.VendorID != VALVE_VID:
-                    continue
-                caps = _caps(h)
-                serial = _string(_HidD_GetSerialNumberString, h)
-                product = _string(_HidD_GetProductString, h)
-            finally:
-                _CloseHandle(h)
-            if caps is None:
-                continue
-            m = re.search(r"&mi_([0-9a-f]{2})", low)
-            number = int(m.group(1), 16) if m else 0
-            key = (attrs.ProductID, serial or path)
-            dev = devices.get(key)
-            if dev is None:
-                dev = UsbDevice(id=path, vid=VALVE_VID, pid=attrs.ProductID,
-                                bcd=attrs.VersionNumber, serial=serial, product=product)
-                devices[key] = dev
-            # Only collections with feature reports carry the command channel; one per interface.
-            if caps.FeatureReportByteLength < 4 or any(i.number == number for i in dev.ifaces):
-                continue
-            # Mice and keyboards (OpenPuck's wake mouse, lizard mode) can't be opened for
-            # read/write on Windows, so mark them the way Linux reports boot devices.
-            if caps.UsagePage == 0x01 and caps.Usage == USAGE_MOUSE:
-                hid_class = (3, 1, 2)
-            elif caps.UsagePage == 0x01 and caps.Usage == USAGE_KEYBOARD:
-                hid_class = (3, 1, 1)
+            if _is_mouse_or_keyboard(first):
+                # Mice and keyboards (OpenPuck's wake mouse, lizard mode) are boot devices on Linux.
+                hid_class = (3, 1, 2 if first["usage"] == USAGE_MOUSE else 1)
             else:
                 hid_class = (3, 0, 0)
-            self._report_len[path] = caps.FeatureReportByteLength
-            dev.ifaces.append(IfaceInfo(node=path, number=number, usage_page=caps.UsagePage,
-                                        hid_class=hid_class, name=product))
+            self._report_len[cmd["path"]] = cmd["feature_len"]
+            devices[gkey[:2]].ifaces.append(IfaceInfo(
+                node=cmd["path"], number=first["mi"], usage_page=first["usage_page"],
+                hid_class=hid_class, name=first["product"]))
         return list(devices.values())
 
     def open(self, node: str) -> WinHidIface:
