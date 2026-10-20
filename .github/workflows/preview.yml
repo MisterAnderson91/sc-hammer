@@ -113,7 +113,7 @@ jobs:
             echo "TITLE=Preview build" >> "$GITHUB_ENV"; echo "TAG=preview" >> "$GITHUB_ENV"
           else
             echo "TITLE=Preview build ($BRANCH)" >> "$GITHUB_ENV"
-            echo "TAG=preview-$(echo "$BRANCH" | tr -c 'A-Za-z0-9._-' '-')" >> "$GITHUB_ENV"
+            echo "TAG=preview-$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-')" >> "$GITHUB_ENV"
           fi
       - name: Write the notes
         run: |
