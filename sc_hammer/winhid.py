@@ -13,7 +13,7 @@ import time
 from ctypes import wintypes as wt
 from typing import Dict, List, Optional
 
-from .transport import VALVE_VID, IfaceInfo, UsbDevice
+from .transport import VALVE_VID, UsbDevice, group_collections
 
 _setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
 _hid = ctypes.WinDLL("hid", use_last_error=True)
@@ -31,7 +31,6 @@ HIDP_STATUS_SUCCESS = 0x00110000
 ERROR_ACCESS_DENIED = 5
 ERROR_GEN_FAILURE = 31  # what a stalled feature request (the device said no) comes back as
 
-USAGE_MOUSE, USAGE_KEYBOARD = 0x02, 0x06
 
 
 class GUID(ctypes.Structure):
@@ -163,10 +162,6 @@ def _caps(h) -> Optional[HIDP_CAPS]:
         _HidD_FreePreparsedData(pp)
 
 
-def _is_mouse_or_keyboard(c: dict) -> bool:
-    return c["usage_page"] == 0x01 and c["usage"] in (USAGE_MOUSE, USAGE_KEYBOARD)
-
-
 def _collections() -> List[dict]:
     """Everything Windows reports about each Valve HID collection."""
     out = []
@@ -270,35 +265,9 @@ class WindowsTransport:
         return tuple(sorted(p for p in _hid_paths() if "vid_28de" in p.lower()))
 
     def enumerate(self) -> List[UsbDevice]:
-        # One USB interface can show up as several collections (e.g. a gamepad collection and a
-        # vendor collection carrying the feature reports). Like Linux, judge the interface by its
-        # first collection, and talk through the collection that has the feature reports.
-        devices: Dict[tuple, UsbDevice] = {}
-        groups: Dict[tuple, List[dict]] = {}
-        for c in _collections():
-            key = (c["pid"], c["serial"] or c["path"])
-            if key not in devices:
-                devices[key] = UsbDevice(id=c["path"], vid=VALVE_VID, pid=c["pid"],
-                                         bcd=c["version"], serial=c["serial"],
-                                         product=c["product"])
-            groups.setdefault(key + (c["mi"],), []).append(c)
-        for gkey, cols in groups.items():
-            cols.sort(key=lambda c: c["col"])
-            first = cols[0]
-            cmd = next((c for c in cols if c["feature_len"] >= 4 and not _is_mouse_or_keyboard(c)),
-                       None)
-            if cmd is None:
-                continue
-            if _is_mouse_or_keyboard(first):
-                # Mice and keyboards (OpenPuck's wake mouse, lizard mode) are boot devices on Linux.
-                hid_class = (3, 1, 2 if first["usage"] == USAGE_MOUSE else 1)
-            else:
-                hid_class = (3, 0, 0)
-            self._report_len[cmd["path"]] = cmd["feature_len"]
-            devices[gkey[:2]].ifaces.append(IfaceInfo(
-                node=cmd["path"], number=first["mi"], usage_page=first["usage_page"],
-                hid_class=hid_class, name=first["product"]))
-        return list(devices.values())
+        devices, report_len = group_collections(_collections())
+        self._report_len.update(report_len)
+        return devices
 
     def open(self, node: str) -> WinHidIface:
         return WinHidIface(node, self._report_len.get(node, 64))

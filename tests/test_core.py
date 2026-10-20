@@ -75,6 +75,33 @@ class ScanTest(Base):
         self.assertEqual(first_usage_page(bytes([0x85, 0x01, 0x05, 0x01])), 0x01)
 
 
+class WindowsGroupingTest(unittest.TestCase):
+    """The collection layout a real Valve puck shows on Windows 11 (from a --diagnose report)."""
+
+    def collections(self):
+        out = []
+        for mi in (2, 3, 4, 5):  # the four slots: mouse, keyboard, vendor with feature reports
+            for col, page, usage, feat in ((1, 0x01, 0x02, 0), (2, 0x01, 0x06, 0),
+                                           (3, 0xFF00, 0x01, 64)):
+                out.append({"path": "hid#vid_28de&pid_1304&mi_%02d&col%02d" % (mi, col),
+                            "pid": 0x1304, "version": 2, "serial": "PUCKSERIAL1",
+                            "product": "Steam Controller Puck", "mi": mi, "col": col,
+                            "usage_page": page, "usage": usage, "feature_len": feat})
+        out.append({"path": "hid#vid_28de&pid_1304&mi_06", "pid": 0x1304, "version": 2,
+                    "serial": "PUCKSERIAL1", "product": "Steam Controller Puck", "mi": 6,
+                    "col": 0, "usage_page": 0xFF00, "usage": 0x02, "feature_len": 64})
+        return out
+
+    def test_slots_are_the_vendor_collections(self):
+        from sc_hammer.transport import group_collections
+        devices, report_len = group_collections(self.collections())
+        self.assertEqual(len(devices), 1)
+        slots = devices[0].command_ifaces()
+        self.assertEqual([i.number for i in slots], [2, 3, 4, 5])
+        self.assertTrue(all(i.node.endswith("col03") for i in slots))
+        self.assertEqual({report_len[i.node] for i in slots}, {64})
+
+
 class ReceiverActionTest(Base):
     def test_move_within_receiver(self):
         rec = self.rslot(LIVING, 2).record
