@@ -57,7 +57,8 @@ class ScanTest(Base):
         self.world.denied.add("fake:%s:0" % LIVING)
         snap = self.scanner.scan()
         self.assertIsNone(snap.receiver(LIVING))
-        self.assertEqual(snap.problems[0].kind, "permission")
+        # Windows has no permissions to fix, so it's reported as "blocked" there.
+        self.assertEqual(snap.problems[0].kind, "blocked" if sys.platform == "win32" else "permission")
 
     def test_echoed_setting_is_not_a_bond(self):
         class Echo:
