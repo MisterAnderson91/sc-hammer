@@ -1,9 +1,11 @@
 # SC Hammer
 
+*U Can't Pair This.*
+
+This repo is based on the Steam Controller pairing scripts in the [OpenPuck](https://github.com/safijari/openpuck) project. In the interest of honesty, this project is mostly claude making a nice UI interface to run those commands. Look, sometimes you don't have the time or energy to do it yourself and I have limited UI design experience. This app is here to solve a bug with the steam controller pairing being unable to switch pairing slots in October 2026 that's causing people annoyance, but if people like it I'll endeavour to keep it maintained or hand it over to someone else who wants to. You can at least feel assured that I've tested it myself. Anyway, claude explains how it works below.
+
 **Move, swap and pair your Steam Controller slots.** See and rearrange which Steam Controllers are paired with
 which receivers, without Steam.
-
-*Not a Hammer editor tool. U Can't Map This.*
 
 ![Main window](docs/screenshot-selected.png)
 
