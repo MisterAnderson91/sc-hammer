@@ -398,9 +398,9 @@ class App:
         if self.demo:
             items.insert(0, Problem("Demo mode", "These are pretend devices. Nothing real is changed."))
         elif self.transport is None:
-            items.insert(0, Problem("This computer isn't running Linux",
-                                    "The app talks to receivers through Linux (SteamOS). You can "
-                                    "still try it with pretend devices.", "nolinux"))
+            items.insert(0, Problem("This computer isn't supported",
+                                    "SC Hammer works on Linux (including SteamOS) and Windows. "
+                                    "You can still try it with pretend devices.", "nolinux"))
         elif hasattr(os, "geteuid") and os.geteuid() == 0:
             items.insert(0, Problem("Running as root",
                                     "That isn't needed and can cause trouble. Start the app "
@@ -884,7 +884,19 @@ def demo_store() -> Store:
 
 
 def desktop_scale() -> float:
-    """The desktop's UI scale from Xft.dpi (KDE/GNOME set it from the display scaling), else 1."""
+    """The desktop's UI scale: Windows' display scaling, or Xft.dpi on Linux (KDE/GNOME set it
+    from the display scaling); else 1. Call before creating the Tk window."""
+    if sys.platform == "win32":
+        import ctypes
+        try:
+            # Draw at the real resolution instead of letting Windows blow up a blurry bitmap.
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except (AttributeError, OSError):
+            pass
+        try:
+            return min(3.0, max(1.0, ctypes.windll.user32.GetDpiForSystem() / 96))
+        except (AttributeError, OSError):
+            return 1.0
     if not sys.platform.startswith("linux"):
         return 1.0
     try:
@@ -901,10 +913,10 @@ def desktop_scale() -> float:
 
 
 def run(transport, demo: bool = False, zoom: Optional[float] = None) -> None:
+    scale = desktop_scale()
     root = tk.Tk(className="sc-hammer")
     root.title(APP_NAME + (" (demo)" if demo else ""))
-    scale = desktop_scale()
-    if sys.platform.startswith("linux"):
+    if sys.platform.startswith("linux") or sys.platform == "win32":
         # Keep Tk's own point-sized defaults (menus, dialogs) at the desktop's scale too.
         root.tk.call("tk", "scaling", 96 * scale / 72)
     if zoom is None:

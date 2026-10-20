@@ -14,7 +14,12 @@ MAX_BACKUPS = 100
 
 
 def _xdg(var: str, fallback: str) -> str:
-    base = os.environ.get(var) or os.path.expanduser(fallback)
+    base = os.environ.get(var)
+    if not base and os.name == "nt":
+        # Windows: settings roam with the user, backups stay on this PC.
+        win = "APPDATA" if var == "XDG_CONFIG_HOME" else "LOCALAPPDATA"
+        base = os.environ.get(win)
+    base = base or os.path.expanduser(fallback)
     new, old = os.path.join(base, APP_DIR), os.path.join(base, OLD_APP_DIR)
     # Carry nicknames and backups over from the old name, once.
     if not os.path.exists(new) and os.path.isdir(old):

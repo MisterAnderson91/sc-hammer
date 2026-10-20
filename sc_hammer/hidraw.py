@@ -11,7 +11,10 @@ report-descriptor parsing rewritten.
 """
 from __future__ import annotations
 
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows: this module's parser is still used by the tests
+    fcntl = None
 import glob
 import os
 import time

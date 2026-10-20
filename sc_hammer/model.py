@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import errno
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -165,7 +166,12 @@ class Scanner:
                         "Couldn't talk to %s" % (dev.product or "a Valve device"), str(e)))
         for r in snap.receivers:
             self._scan_wireless_controllers(r, snap)
-        if denied:
+        if denied and sys.platform == "win32":
+            snap.problems.append(Problem(
+                "Couldn't open: " + ", ".join(sorted(set(denied))),
+                "Windows wouldn't let SC Hammer use it. Close other controller tools (Steam can "
+                "stay open), unplug it and plug it back in, then click Refresh.", "blocked"))
+        elif denied:
             snap.problems.append(Problem(
                 "No permission to use: " + ", ".join(sorted(set(denied))),
                 "This user account isn't allowed to open the device. See \"Fix permissions\".",

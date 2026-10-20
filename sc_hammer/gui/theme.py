@@ -35,8 +35,8 @@ PAIR_COLORS = ["#4c9aff", "#f2a541", "#b383ff", "#4cc38a", "#ff6b8b", "#38c6d6",
 
 CHIP = {"ok": ("#173a2b", "#5fd69b"), "accent": ("#1d3554", "#8cc0ff"), "warn": ("#3a2c10", "#f0b85a")}
 
-PREFERRED_FAMILIES = ("Noto Sans", "Cantarell", "Inter", "Ubuntu", "DejaVu Sans", "Helvetica Neue",
-                      "Helvetica", "Arial")
+PREFERRED_FAMILIES = ("Noto Sans", "Cantarell", "Inter", "Ubuntu", "Segoe UI", "DejaVu Sans",
+                      "Helvetica Neue", "Helvetica", "Arial")
 
 
 class Fonts:
@@ -52,7 +52,7 @@ class Fonts:
     def __init__(self, root: tk.Misc, zoom: float = 1.0, scale: float = 1.0):
         families = set(tkfont.families(root))
         family = next((f for f in PREFERRED_FAMILIES if f in families), "TkDefaultFont")
-        mono = next((f for f in ("Noto Sans Mono", "DejaVu Sans Mono", "Menlo", "Courier")
+        mono = next((f for f in ("Noto Sans Mono", "DejaVu Sans Mono", "Consolas", "Menlo", "Courier")
                      if f in families), "TkFixedFont")
         self.zoom = zoom
         self.scale = scale

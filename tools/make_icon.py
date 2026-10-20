@@ -2,7 +2,7 @@
 """Draws the app icon (a hammer coming down on a Steam Controller, with wireless arcs) as PNGs,
 using only the standard library.
 
-    python3 tools/make_icon.py      # writes sc_hammer/assets/icon-{32,64,128,256}.png
+    python3 tools/make_icon.py      # writes sc_hammer/assets/icon-{32,64,128,256}.png + icon.ico
 """
 import math
 import os
@@ -127,12 +127,31 @@ def png(w, h, raw):
             + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
+def ico(images):
+    """Windows .ico holding PNG images (Vista and later read PNG entries directly)."""
+    head = struct.pack("<HHH", 0, 1, len(images))
+    offset = 6 + 16 * len(images)
+    entries, data = b"", b""
+    for size, blob in images:
+        dim = 0 if size >= 256 else size
+        entries += struct.pack("<BBBBHHII", dim, dim, 0, 0, 1, 32, len(blob), offset + len(data))
+        data += blob
+    return head + entries + data
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
-    for size in (32, 64, 128, 256):
-        with open(os.path.join(OUT, "icon-%d.png" % size), "wb") as f:
-            f.write(render(size))
-        print("wrote icon-%d.png" % size)
+    images = []
+    for size in (16, 32, 48, 64, 128, 256):
+        blob = render(size)
+        images.append((size, blob))
+        if size in (32, 64, 128, 256):
+            with open(os.path.join(OUT, "icon-%d.png" % size), "wb") as f:
+                f.write(blob)
+            print("wrote icon-%d.png" % size)
+    with open(os.path.join(OUT, "icon.ico"), "wb") as f:
+        f.write(ico(images))
+    print("wrote icon.ico")
 
 
 if __name__ == "__main__":

@@ -1,11 +1,12 @@
-# Every push to main that changes the app builds an AppImage and puts it in a draft release called
-# "Preview build" (only people with write access can see drafts). Nothing is published; releasing is
-# a separate, deliberate step: the Release workflow.
+# Every push to main (or a test-* branch) that changes the app runs the tests (Linux and Windows),
+# builds the AppImage and the Windows .exe, and puts both in a draft release: "Preview build" for
+# main, "Preview build (<branch>)" for a test branch. Only people with write access can see drafts.
+# Nothing is published; releasing is a separate, deliberate step: the Release workflow.
 name: Preview build
 
 on:
   push:
-    branches: [main]
+    branches: [main, "test-*"]
     paths:
       - "sc_hammer/**"
       - "packaging/**"
@@ -14,45 +15,119 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: preview
+  group: preview-${{ github.ref_name }}
   cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
-  preview:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Run the tests
+        run: python -m unittest discover -s tests -v
+      - name: Smoke test (demo devices, then the real device code with nothing plugged in)
+        run: |
+          python -m sc_hammer --demo --list
+          python -m sc_hammer --list
+
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          base=$(python3 -c "import sc_hammer; print(sc_hammer.__version__)")
+          echo "version=${base}-preview.$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: [test, version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install squashfs-tools
+        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
+      - name: Build the AppImage
+        run: packaging/build-appimage.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: appimage
+          path: dist/*.AppImage
+
+  windows:
+    needs: [test, version]
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the .exe
+        run: |
+          python -m pip install pyinstaller
+          python packaging/build_windows.py
+      - name: Smoke test the .exe
+        run: |
+          ./dist/SC-Hammer-$VERSION-windows-x64.exe --demo --list | tee out.txt
+          grep -q "Steam Controller Puck" out.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/*.exe
+
+  publish:
+    needs: [linux, windows, version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Run the tests
-        run: python3 -m unittest discover -s tests -v
-
-      - name: Install squashfs-tools
-        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
-
-      - name: Pick the preview version
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Name the draft after the branch
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
-          base=$(python3 -c "import sc_hammer; print(sc_hammer.__version__)")
-          echo "VERSION=${base}-preview.$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
-
-      - name: Build the AppImage
-        run: packaging/build-appimage.sh
-
+          if [ "$BRANCH" = main ]; then
+            echo "TITLE=Preview build" >> "$GITHUB_ENV"; echo "TAG=preview" >> "$GITHUB_ENV"
+          else
+            echo "TITLE=Preview build ($BRANCH)" >> "$GITHUB_ENV"
+            echo "TAG=preview-$(echo "$BRANCH" | tr -c 'A-Za-z0-9._-' '-')" >> "$GITHUB_ENV"
+          fi
       - name: Write the notes
         run: |
-          python3 .github/scripts/release_notes.py --preview --version "$VERSION" \
-            --appimage dist/SC-Hammer-$VERSION-x86_64.AppImage > notes.md
-
-      - name: Replace the preview draft
+          python3 .github/scripts/release_notes.py --preview --branch "${{ github.ref_name }}" \
+            --version "$VERSION" \
+            --asset "dist/SC-Hammer-$VERSION-x86_64.AppImage" \
+            --asset "dist/SC-Hammer-$VERSION-windows-x64.exe" > notes.md
+      - name: Replace this branch's preview draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release list --limit 100 --json tagName,isDraft,name \
-            --jq '.[] | select(.isDraft and .name == "Preview build") | .tagName' \
+            --jq ".[] | select(.isDraft and .name == \"$TITLE\") | .tagName" \
             | while read -r tag; do gh release delete "$tag" --yes; done
-          gh release create preview --draft --target "$GITHUB_SHA" --title "Preview build" \
-            --notes-file notes.md dist/SC-Hammer-$VERSION-x86_64.AppImage
+          gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TITLE" \
+            --notes-file notes.md "dist/SC-Hammer-$VERSION-x86_64.AppImage" \
+            "dist/SC-Hammer-$VERSION-windows-x64.exe"

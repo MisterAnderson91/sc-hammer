@@ -4,7 +4,8 @@
 Lists the commits since the last release that touch the app itself (sc_hammer/, packaging/);
 README, docs and CI changes are left out. Adds install/upgrade steps and the AppImage checksum.
 
-    release_notes.py --version 0.2.0 --appimage dist/SC-Hammer-0.2.0-x86_64.AppImage \\
+    release_notes.py --version 0.2.0 --asset dist/SC-Hammer-0.2.0-x86_64.AppImage \\
+        --asset dist/SC-Hammer-0.2.0-windows-x64.exe \\
         [--prev-tag v0.1.0] [--highlights "First point; second point"] [--preview]
 """
 import argparse
@@ -67,21 +68,25 @@ def sha256(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", required=True)
-    ap.add_argument("--appimage", required=True)
+    ap.add_argument("--asset", action="append", required=True,
+                    help="a release file (the AppImage, the Windows .exe); repeat for each")
     ap.add_argument("--prev-tag")
     ap.add_argument("--highlights", default="")
     ap.add_argument("--preview", action="store_true")
+    ap.add_argument("--branch", default="main")
     args = ap.parse_args()
 
     prev = args.prev_tag or last_tag()
     repo = os.environ.get("GITHUB_REPOSITORY", "")
-    name = os.path.basename(args.appimage)
+    names = [os.path.basename(a) for a in args.asset]
+    appimage = next((n for n in names if n.endswith(".AppImage")), None)
+    exe = next((n for n in names if n.endswith(".exe")), None)
     out = []
 
     if args.preview:
-        out += ["> **Preview build, not released.** Built from `%s`. This draft is replaced on every "
-                "push to main. To release, run the **Release** workflow; don't publish this draft."
-                % git("rev-parse", "--short", "HEAD"), ""]
+        out += ["> **Preview build, not released.** Built from `%s` on `%s`. This draft is replaced "
+                "on every push to that branch. To release, run the **Release** workflow; don't "
+                "publish this draft." % (git("rev-parse", "--short", "HEAD"), args.branch), ""]
 
     points = [p.strip() for p in re.split(r"[;\n]", args.highlights) if p.strip()]
     if points:
@@ -100,26 +105,27 @@ def main():
     elif prev:
         out += ["No app changes since %s." % prev, ""]
 
+    out += ["## Install", ""]
+    if appimage:
+        out += [
+            "**Linux / SteamOS:** download **`%s`**, make it executable (right-click → Properties → "
+            "Permissions → *Is executable*, or `chmod +x %s`), then double-click it. On SteamOS, "
+            "use Desktop Mode (or add it as a non-Steam game). No sudo needed; if a receiver or "
+            "controller doesn't show up, run it once with `--check`." % (appimage, appimage), ""]
+    if exe:
+        out += [
+            "**Windows 10/11:** download **`%s`** and double-click it. Nothing to install. Windows "
+            "may say *\"Windows protected your PC\"* because the app isn't code-signed: click "
+            "**More info → Run anyway**." % exe, ""]
     out += [
-        "## Install",
-        "",
-        "1. Download **`%s`** below." % name,
-        "2. Make it executable: right-click it → Properties → Permissions → *Is executable*, or "
-        "`chmod +x %s`." % name,
-        "3. Double-click it. On SteamOS, use Desktop Mode (or add it as a non-Steam game).",
-        "",
-        "No sudo needed. If a receiver or controller doesn't show up, run it once with `--check`.",
-        "",
         "## Upgrading",
         "",
-        "Replace the old AppImage with this one. Your nicknames and backups are kept.",
+        "Replace the old file with the new one. Your nicknames and backups are kept.",
         "",
-        "## Checksum",
+        "## Checksums (SHA-256)",
         "",
         "```",
-        "%s  %s" % (sha256(args.appimage), name),
-        "```",
-    ]
+    ] + ["%s  %s" % (sha256(a), os.path.basename(a)) for a in args.asset] + ["```"]
     if repo and prev and not args.preview:
         out += ["", "**Full changelog:** https://github.com/%s/compare/%s...v%s"
                 % (repo, prev, args.version)]

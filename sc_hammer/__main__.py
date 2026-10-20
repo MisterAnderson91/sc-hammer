@@ -17,17 +17,22 @@ def make_transport(demo: bool):
     if sys.platform.startswith("linux"):
         from .hidraw import LinuxTransport
         return LinuxTransport()
+    if sys.platform == "win32":
+        from .winhid import WindowsTransport
+        return WindowsTransport()
     return None
 
 
 def check() -> int:
-    """Report whether this user can open every Valve receiver/controller without sudo."""
-    if not sys.platform.startswith("linux"):
-        print("--check only works on Linux.")
+    """Report whether this user can open every Valve receiver/controller (no sudo/admin)."""
+    transport = make_transport(False)
+    if transport is None:
+        print("--check only works on Linux and Windows.")
         return 2
-    from .hidraw import LinuxTransport
-    print("Running as %s (uid %d)" % (os.environ.get("USER", "?"), os.geteuid()))
-    devices = [d for d in LinuxTransport().enumerate()
+    linux = sys.platform.startswith("linux")
+    if linux:
+        print("Running as %s (uid %d)" % (os.environ.get("USER", "?"), os.geteuid()))
+    devices = [d for d in transport.enumerate()
                if d.pid in RECEIVER_PIDS or d.pid in CONTROLLER_PIDS]
     if not devices:
         print("No Valve receivers or controllers are plugged in. Plug one in and run this again.")
@@ -36,9 +41,8 @@ def check() -> int:
     for dev in devices:
         print("\n%s (28de:%04x) serial %s" % (dev.product or "?", dev.pid, dev.serial or "?"))
         for info in dev.command_ifaces():
-            st = os.stat(info.node)
             try:
-                os.close(os.open(info.node, os.O_RDWR))
+                transport.open(info.node).close()
                 ok = "OK, can open"
             except PermissionError:
                 ok = "PERMISSION DENIED"
@@ -46,18 +50,22 @@ def check() -> int:
             except OSError as e:
                 ok = "error: %s" % e
                 bad += 1
-            print("  %-14s mode %o  %s" % (info.node, st.st_mode & 0o777, ok))
+            if linux:
+                mode = "mode %o" % (os.stat(info.node).st_mode & 0o777)
+                print("  %-14s %s  %s" % (info.node, mode, ok))
+            else:
+                print("  interface %d  %s" % (info.number, ok))
     print()
     if bad:
         print("Some devices can't be opened by this user. See \"Permissions\" in the README.")
         return 1
-    print("All good: everything can be opened without sudo.")
+    print("All good: everything can be opened without %s." % ("sudo" if linux else "admin"))
     return 0
 
 
 def list_devices(transport) -> int:
     if transport is None:
-        print("Listing devices only works on Linux (or with --demo).")
+        print("Listing devices only works on Linux and Windows (or with --demo).")
         return 2
     snap = Scanner(transport).scan()
     for prob in snap.problems:
@@ -84,6 +92,25 @@ def list_devices(transport) -> int:
     return 0
 
 
+def _console_for_windowed_exe() -> None:
+    """The Windows .exe is built without a console window, so print() has nowhere to go. For
+    --list/--check/--version, write to the terminal it was started from (or a redirect)."""
+    if sys.platform != "win32" or sys.stdout is not None:
+        return
+    import ctypes
+    import msvcrt
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE: set when output is redirected
+    if handle in (0, -1, None):
+        if not kernel32.AttachConsole(-1):  # ATTACH_PARENT_PROCESS
+            return
+        sys.stdout = sys.stderr = open("CONOUT$", "w", buffering=1)
+        print()
+        return
+    fd = msvcrt.open_osfhandle(handle, os.O_WRONLY)
+    sys.stdout = sys.stderr = open(fd, "w", buffering=1)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="sc-hammer",
                                  description="%s: move, swap, copy and erase Steam Controller "
@@ -95,6 +122,9 @@ def main(argv=None) -> int:
                     help="check this user can open the devices (no sudo needed) and exit")
     ap.add_argument("--zoom", type=float, default=None, help="text size, e.g. 1.5")
     ap.add_argument("--version", action="version", version="%s %s" % (APP_NAME, __version__))
+    if set(sys.argv[1:] if argv is None else argv) & {"--list", "--check", "--version", "-h",
+                                                       "--help"}:
+        _console_for_windowed_exe()
     args = ap.parse_args(argv)
     if args.check:
         return check()

@@ -16,7 +16,8 @@ It works with:
 - the receiver built into a **Steam Machine**
 - **[OpenPuck](https://github.com/safijari/openpuck)** receivers in Steam mode
 
-Any number of receivers and controllers can be connected at once.
+Any number of receivers and controllers can be connected at once. It runs on **Linux** (including SteamOS)
+and **Windows 10/11**.
 
 ## What you can do
 
@@ -45,8 +46,11 @@ stored on your computer.
 
 ## Download and run
 
-1. Download `SC-Hammer-…-x86_64.AppImage` from the
-   [Releases](../../releases) page.
+Get it from the [Releases](../../releases) page.
+
+### Linux / SteamOS
+
+1. Download `SC-Hammer-…-x86_64.AppImage`.
 2. Make it executable: right-click it → **Properties** → **Permissions** → **Is executable**, or in a
    terminal:
    ```bash
@@ -56,22 +60,32 @@ stored on your computer.
 
 No installation and no `sudo` are needed. Everything (Python and Tk) is inside the AppImage.
 
-### Steam Deck / SteamOS
-
-Run it from **Desktop Mode**. To use it from Game Mode, add the AppImage as a non-Steam game (Steam →
+On a Steam Deck or Steam Machine, run it from **Desktop Mode**. To use it from Game Mode, add the AppImage as a non-Steam game (Steam →
 **Games** → **Add a Non-Steam Game to My Library**) and use the trackpad as a mouse.
+
+### Windows 10/11
+
+1. Download `SC-Hammer-…-windows-x64.exe`.
+2. Double-click it. There's nothing to install; it unpacks itself each time it starts, which takes a moment.
+
+Windows may say *"Windows protected your PC"* the first time, because the app isn't code-signed. Click
+**More info → Run anyway**. No admin rights are needed.
 
 ### Try it without hardware
 
 ```bash
-./SC-Hammer-*-x86_64.AppImage --demo
+./SC-Hammer-*-x86_64.AppImage --demo          # Linux
+SC-Hammer-*-windows-x64.exe --demo            # Windows
 ```
 
 This shows two pretend receivers and four pretend controllers. Nothing real is changed.
 
 ## Permissions
 
-The app talks to the devices through `/dev/hidraw*`. On SteamOS, and on any desktop where Steam is installed,
+**Windows:** nothing to set up and no admin rights needed; Windows lets any program talk to these devices.
+If one won't open, close other controller tools (Steam can stay open), unplug it and plug it back in.
+
+**Linux:** the app talks to the devices through `/dev/hidraw*`. On SteamOS, and on any desktop where Steam is installed,
 the logged-in user is normally allowed to open Valve devices, because Steam's device rules (the
 `steam-devices` package) give the active user access. **Don't run the app with sudo.**
 
@@ -129,6 +143,9 @@ make test        # unit tests, run against simulated devices
 make appimage    # build dist/SC-Hammer-<version>-x86_64.AppImage
 ```
 
+On Windows, `pip install pyinstaller` then `python packaging/build_windows.py` builds
+`dist/SC-Hammer-<version>-windows-x64.exe`: one file with Python, Tk and the app inside.
+
 `make appimage` works on Linux or macOS. It downloads a portable Python with Tk
 ([python-appimage](https://github.com/niess/python-appimage)) and the AppImage
 [type-2 runtime](https://github.com/AppImage/type2-runtime), adds the app, and packs it. It needs `curl`,
@@ -139,10 +156,10 @@ Linux, nothing else (it falls back to `appimagetool`).
 
 GitHub Actions does the building:
 
-- **Every push to `main` that changes the app** runs the tests and builds an AppImage into a draft release called *Preview build*
+- **Every push to `main` that changes the app** runs the tests on Linux and Windows and builds the AppImage and the Windows .exe into a draft release called *Preview build*
   (drafts are only visible to maintainers). Download it from the Releases page to try it; each push replaces it.
 - **Releasing is a deliberate step:** Actions → **Release** → *Run workflow*. Pick a patch, minor or major bump and
-  optionally type a few highlights (separated by `;`). It builds the AppImage, tags `vX.Y.Z`, publishes the release
+  optionally type a few highlights (separated by `;`). It builds both, tags `vX.Y.Z`, publishes the release
   with notes listing the app changes since the last release, and removes the preview draft. From a terminal:
   `gh workflow run release.yml -f bump=minor -f highlights="First point; second point"`.
 
@@ -152,12 +169,13 @@ GitHub Actions does the building:
 |---|---|
 | `sc_hammer/protocol.py` | The Valve feature-report commands for reading and writing bonds |
 | `sc_hammer/hidraw.py` | Linux `/dev/hidraw` + sysfs device discovery |
+| `sc_hammer/winhid.py` | Windows HID access (SetupAPI + hid.dll via ctypes) |
 | `sc_hammer/model.py` | Scans devices into receivers, controllers and slots |
 | `sc_hammer/actions.py` | Move / swap / erase / pair / restore as checked write plans |
 | `sc_hammer/fake.py` | Simulated devices for `--demo` and the tests |
 | `sc_hammer/gui/` | The Tk window |
 | `tests/` | Unit tests against the simulated devices |
-| `packaging/` | AppImage build script, launcher and desktop entry |
+| `packaging/` | AppImage and Windows build scripts, launcher and desktop entry |
 | `.github/` | Preview and release workflows, release-notes script |
 
 ## How it works

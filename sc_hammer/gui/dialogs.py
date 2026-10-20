@@ -154,6 +154,9 @@ def choose_slot(parent: tk.Misc, fonts: Fonts, title: str, intro: str,
 
 def open_folder(path: str) -> None:
     os.makedirs(path, exist_ok=True)
+    if sys.platform == "win32":
+        os.startfile(path)
+        return
     opener = "open" if sys.platform == "darwin" else "xdg-open"
     try:
         subprocess.Popen([opener, path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

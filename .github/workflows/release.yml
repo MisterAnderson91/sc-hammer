@@ -1,6 +1,7 @@
 # Publishes a release when you ask for one: Actions → Release → Run workflow (or from a terminal:
 # gh workflow run release.yml -f bump=minor -f highlights="First point; second point").
-# Builds the AppImage from main, tags vX.Y.Z, writes the notes and removes the preview draft.
+# Runs the tests, builds the AppImage and the Windows .exe from main, tags vX.Y.Z, writes the notes
+# and removes the preview draft.
 name: Release
 
 on:
@@ -23,20 +24,29 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Run the tests
+        run: python -m unittest discover -s tests -v
+
+  version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prev: ${{ steps.v.outputs.prev }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Run the tests
-        run: python3 -m unittest discover -s tests -v
-
-      - name: Install squashfs-tools
-        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
-
-      - name: Work out the version
+      - id: v
         env:
           BUMP: ${{ inputs.bump }}
         run: |
@@ -59,27 +69,82 @@ jobs:
           PY
           )
           fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-          echo "PREV_TAG=$prev" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prev=$prev" >> "$GITHUB_OUTPUT"
           echo "Releasing v$version (previous: ${prev:-none})"
 
+  linux:
+    needs: [test, version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install squashfs-tools
+        run: sudo apt-get update && sudo apt-get install -y squashfs-tools
       - name: Build the AppImage
         run: packaging/build-appimage.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: appimage
+          path: dist/*.AppImage
 
+  windows:
+    needs: [test, version]
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the .exe
+        run: |
+          python -m pip install pyinstaller
+          python packaging/build_windows.py
+      - name: Smoke test the .exe
+        run: |
+          ./dist/SC-Hammer-$VERSION-windows-x64.exe --demo --list | tee out.txt
+          grep -q "Steam Controller Puck" out.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/*.exe
+
+  publish:
+    needs: [linux, windows, version]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PREV_TAG: ${{ needs.version.outputs.prev }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
       - name: Write the notes
         env:
           HIGHLIGHTS: ${{ inputs.highlights }}
         run: |
           python3 .github/scripts/release_notes.py --version "$VERSION" ${PREV_TAG:+--prev-tag "$PREV_TAG"} \
-            --highlights "$HIGHLIGHTS" --appimage dist/SC-Hammer-$VERSION-x86_64.AppImage > notes.md
+            --highlights "$HIGHLIGHTS" \
+            --asset "dist/SC-Hammer-$VERSION-x86_64.AppImage" \
+            --asset "dist/SC-Hammer-$VERSION-windows-x64.exe" > notes.md
           cat notes.md >> "$GITHUB_STEP_SUMMARY"
-
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "v$VERSION" --target "$GITHUB_SHA" --title "SC Hammer $VERSION" \
-            --notes-file notes.md dist/SC-Hammer-$VERSION-x86_64.AppImage
+            --notes-file notes.md "dist/SC-Hammer-$VERSION-x86_64.AppImage" \
+            "dist/SC-Hammer-$VERSION-windows-x64.exe"
           gh release list --limit 100 --json tagName,isDraft,name \
             --jq '.[] | select(.isDraft and .name == "Preview build") | .tagName' \
             | while read -r tag; do gh release delete "$tag" --yes; done
