@@ -121,7 +121,7 @@ jobs:
         run: |
           python3 .github/scripts/release_notes.py --preview --branch "${{ github.ref_name }}" \
             --version "$VERSION" \
-            --asset "dist/SC-Hammer-$VERSION-x86_64.AppImage" \
+            --asset "dist/SC-Hammer-x86_64.AppImage" \
             --asset "dist/SC-Hammer-$VERSION-windows-x64.exe" > notes.md
       - name: Replace this branch's preview draft
         env:
@@ -131,5 +131,5 @@ jobs:
             --jq ".[] | select(.isDraft and .name == \"$TITLE\") | .tagName" \
             | while read -r tag; do gh release delete "$tag" --yes; done
           gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TITLE" \
-            --notes-file notes.md "dist/SC-Hammer-$VERSION-x86_64.AppImage" \
+            --notes-file notes.md "dist/SC-Hammer-x86_64.AppImage" \
             "dist/SC-Hammer-$VERSION-windows-x64.exe"

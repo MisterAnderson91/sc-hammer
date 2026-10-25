@@ -6,7 +6,7 @@ README, docs and CI changes are left out. Every release in a series (e.g. 0.1.x)
 series summary from .github/release-notes/<series>.md and the notes of the earlier releases in that
 series (fetched with gh), then install/upgrade steps and checksums.
 
-    release_notes.py --version 0.2.0 --asset dist/SC-Hammer-0.2.0-x86_64.AppImage \\
+    release_notes.py --version 0.2.0 --asset dist/SC-Hammer-x86_64.AppImage \\
         --asset dist/SC-Hammer-0.2.0-windows-x64.exe \\
         [--prev-tag v0.1.0] [--highlights "First point; second point"] [--preview]
 """
