@@ -37,7 +37,9 @@ class Names(Namer):
         nick = self.store.name(serial)
         if nick:
             return nick
-        return "Controller %s" % short_serial(serial) if serial else "Unnamed controller"
+        c = self.snap.controller(serial) if serial else None
+        kind = "ReversePuck" if c and c.reversepuck else "Controller"
+        return "%s %s" % (kind, short_serial(serial)) if serial else "Unnamed controller"
 
 
 @dataclass
@@ -93,7 +95,7 @@ class Describer:
             return t
         c, cs = hits[0]
         if c.usb:
-            t.sub = "Plugged in with USB (its %s)" % slot_name(True, cs.index)
+            t.sub = "Plugged in with USB (its %s)" % slot_name(True, cs.index, c.reversepuck)
         elif c.via and c.via[0] != r.serial:
             t.sub = "Connected to %s right now" % self.n.receiver(c.via[0])
         else:
@@ -131,7 +133,9 @@ class Describer:
         return nick or self.n.receiver(r.serial), line1 + "\n" + line2
 
     def controller_title(self, c: Controller) -> Tuple[str, str]:
-        if c.usb:
+        if c.reversepuck:
+            how = "ReversePuck (Steam Deck as a controller), plugged in with USB"
+        elif c.usb:
             how = "Plugged in with USB"
         elif c.via:
             how = "Wireless, through %s" % self.n.receiver(c.via[0])

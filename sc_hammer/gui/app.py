@@ -81,7 +81,8 @@ class SlotRow(tk.Frame):
             sub += "   ·   key " + text.key.hex()
         auto_wrap(tk.Label(self, text=sub, bg=C["slot"], fg=C["muted"], font=f["small"], anchor="w",
                            justify="left"), f.px(200)).grid(row=1, column=2, columnspan=2, sticky="ew")
-        if ref.kind == a.CONTROLLER and ref.index < len(CONTROLLER_SLOT_COMBOS):
+        if ref.kind == a.CONTROLLER and ref.index < len(CONTROLLER_SLOT_COMBOS) and \
+                not app.lookup(ref)[0].reversepuck:
             auto_wrap(tk.Label(self, text="Turn on with %s to use this slot" %
                                CONTROLLER_SLOT_COMBOS[ref.index], bg=C["slot"], fg=C["faint"],
                                font=f["small"], anchor="w", justify="left"),
@@ -303,6 +304,8 @@ class App:
         title, sub = self.describer.controller_title(c)
 
         def extra(btns: tk.Frame) -> None:
+            if c.reversepuck:
+                return  # picks up changes straight away and never goes wireless
             if c.usb:
                 Button(btns, f, "Restart", lambda: self.restart_controller(c.serial), "ghost",
                        small=True, bg=C["card"]).pack(side="right")
@@ -322,7 +325,7 @@ class App:
                                justify="left")).pack(fill="x", pady=(f.px(6), 0))
 
     def _slot_row(self, card: tk.Frame, ref: a.SlotRef) -> None:
-        if ref.kind == a.CONTROLLER:
+        if ref.kind == a.CONTROLLER and not self.lookup(ref)[0].reversepuck:
             label = slot_name(True, ref.index).split()[0].capitalize()
         else:
             label = "Slot %d" % (ref.index + 1)
@@ -459,8 +462,7 @@ class App:
                  else self.describer.n.controller(dev.serial))
         text = (self.describer.receiver_slot(dev, slot) if self.selected.kind == a.RECEIVER
                 else self.describer.controller_slot(dev, slot))
-        line("%s · %s:  %s" % (where, slot_name(self.selected.kind == a.CONTROLLER, slot.index),
-                               text.main))
+        line("%s · %s:  %s" % (where, a.sn(dev, slot), text.main))
         line(text.sub, "muted", "small")
         if isinstance(dev, Controller) and not dev.usb:
             line("This controller is wireless. Plug it in with USB to change its slots.", "warn",

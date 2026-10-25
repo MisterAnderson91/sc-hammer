@@ -33,6 +33,14 @@ class FakeController:
     build: int = 1756684800
     commit: str = "a81d40c97e5f"
     staged: dict = field(default_factory=dict)
+    reversepuck: bool = False  # a ReversePuck dongle: rp/info, rp/bond/N, no active slot
+
+    def bond_index(self, name: str) -> Optional[int]:
+        """The bond slot a setting name refers to, or None."""
+        if self.reversepuck and name.startswith("rp/bond/") and name[8:].isdigit() and \
+                int(name[8:]) < len(self.bonds):
+            return int(name[8:])
+        return p.BOND_SETTINGS.index(name) if name in p.BOND_SETTINGS else None
 
 
 def _attrs(pid: int, build: int) -> bytes:
@@ -79,10 +87,13 @@ class World:
             return _reply(1, cmd, _attrs(0x1302, c.build))
         if cmd == p.CMD_SETTING_READ:
             name = payload.split(b"\x00")[0].decode()
-            if name == p.TRANSPORT_SETTING:
+            if name == p.TRANSPORT_SETTING and not c.reversepuck:
                 return _reply(1, cmd, bytes([2 + c.active]))
-            if name in p.BOND_SETTINGS:
-                bond = c.bonds[p.BOND_SETTINGS.index(name)]
+            if name == p.RP_INFO_SETTING and c.reversepuck:
+                return _reply(1, cmd, b"RP" + bytes([1, len(c.bonds)]))
+            i = c.bond_index(name)
+            if i is not None:
+                bond = c.bonds[i]
                 return _reply(1, cmd, bond if bond is not None else b"")
             return _reply(1, cmd, b"")
         if cmd == p.CMD_SETTING_WRITE:
@@ -90,14 +101,14 @@ class World:
             c.staged[name.decode()] = value[:p.RECORD_LEN]
             return _reply(1, cmd, b"")
         if cmd == p.CMD_SETTING_DELETE:
-            name = payload.split(b"\x00")[0].decode()
-            if name in p.BOND_SETTINGS:
-                c.bonds[p.BOND_SETTINGS.index(name)] = None
+            i = c.bond_index(payload.split(b"\x00")[0].decode())
+            if i is not None:
+                c.bonds[i] = None
             return _reply(1, cmd, b"")
         if cmd == p.CMD_SETTING_COMMIT:
             name = payload.split(b"\x00")[0].decode()
-            if name in c.staged and name in p.BOND_SETTINGS:
-                c.bonds[p.BOND_SETTINGS.index(name)] = c.staged.pop(name)
+            if name in c.staged and c.bond_index(name) is not None:
+                c.bonds[c.bond_index(name)] = c.staged.pop(name)
             elif name in c.staged and name == p.TRANSPORT_SETTING:
                 c.active = p.TRANSPORT_TO_SLOT[c.staged.pop(name)[0]]
             return _reply(1, cmd, b"")
@@ -106,7 +117,7 @@ class World:
                 c.powered = False
             return None
         if cmd == p.CMD_REBOOT:
-            if payload[:4] == p.REBOOT_TO_WIRELESS:
+            if payload[:4] == p.REBOOT_TO_WIRELESS and not c.reversepuck:
                 c.usb = False
             return None
         return _reply(1, cmd, payload)
@@ -167,8 +178,8 @@ class FakeControllerIface(_Iface):
         if not self.c.usb:
             raise OSError(19, "No such device")
         name, _, value = payload.partition(b"\x00")
-        if cmd == p.CMD_SETTING_WRITE and name.decode() in p.BOND_SETTINGS and \
-                not p.record_used(value):
+        if cmd == p.CMD_SETTING_WRITE and not self.c.reversepuck and \
+                name.decode() in p.BOND_SETTINGS and not p.record_used(value):
             raise BrokenPipeError(32, "Broken pipe")  # what a real controller did
         self.resp[1] = self.world.controller_reply(self.c, cmd, payload) if rid == 1 else None
 

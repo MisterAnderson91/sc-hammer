@@ -102,8 +102,7 @@ def _find(snap: Snapshot, ref: SlotRef):
         raise NotAllowed("That slot isn't there any more. Click Refresh and try again.")
     slot = dev.slots[ref.index]
     if slot.state == UNKNOWN:
-        raise NotAllowed("The %s couldn't be read. Click Refresh and try again." %
-                         slot_name(ref.kind == CONTROLLER, ref.index))
+        raise NotAllowed("The %s couldn't be read. Click Refresh and try again." % sn(dev, slot))
     return dev, slot
 
 
@@ -140,13 +139,17 @@ class _Ctx:
         return None
 
     def active_note(self, c: Controller) -> str:
+        if c.reversepuck:
+            return ""  # a ReversePuck picks up slot changes straight away
         return "Changes to a controller take effect after it restarts. Use \"Restart\" on the " \
                "controller, or unplug it and turn it off and on again."
 
 
 def sn(dev, slot) -> str:
-    """The slot's name on its device: "slot 3", or "right slot" / "left slot" on a controller."""
-    return slot_name(isinstance(dev, Controller), slot if isinstance(slot, int) else slot.index)
+    """The slot's name on its device: "slot 3", or "right slot" / "left slot" on a controller
+    (a ReversePuck's slots are numbered like a receiver's)."""
+    return slot_name(isinstance(dev, Controller), slot if isinstance(slot, int) else slot.index,
+                     getattr(dev, "reversepuck", False))
 
 
 def _ref(dev, slot) -> SlotRef:
@@ -323,6 +326,9 @@ def _swap(ctx: _Ctx, sdev, sslot, ddev, dslot) -> Plan:
     if isinstance(sdev, Receiver):
         title = "Swap slots %d and %d of %s?" % (sslot.index + 1, dslot.index + 1,
                                                   ctx.n.receiver(sdev.serial))
+    elif sdev.reversepuck:
+        title = "Swap slots %d and %d of %s?" % (sslot.index + 1, dslot.index + 1,
+                                                  ctx.n.controller(sdev.serial))
     else:
         title = "Swap the right and left slots of %s?" % ctx.n.controller(sdev.serial)
     pl = Plan("Swap", title)
@@ -426,6 +432,10 @@ def _pair(ctx: _Ctx, sdev, sslot, ddev, dslot) -> Plan:
         pl.warnings.append("The controller is using its %s right now, so it won't use this "
                            "pairing until you switch it to the %s (Go wireless, or turn it on "
                            "with %s)." % (sn(cdev, cdev.active), sn(cdev, cslot), combo(cslot)))
+    if cdev.reversepuck:
+        # The dongle stays plugged into the Deck and uses a new pairing straight away.
+        pl.after = "The ReversePuck can connect to that receiver straight away."
+        return pl
     pl.steps.append(RebootController(cdev.serial, True))
     pl.after = "The controller restarts and connects wirelessly. You can unplug its USB cable."
     return pl
@@ -436,6 +446,9 @@ def plan_restart(snap: Snapshot, serial: str, namer: Optional[Namer] = None) -> 
     c = snap.controller(serial)
     if c is None or not c.usb:
         raise NotAllowed("Only a controller plugged in with USB can be restarted from here.")
+    if c.reversepuck:
+        raise NotAllowed("A ReversePuck picks up slot changes straight away; it doesn't need a "
+                         "restart.")
     return Plan("Restart", "Restart %s?" % n.controller(serial),
                 ["The controller restarts so it picks up changes to its slots."],
                 steps=[RebootController(serial, False)], backup=False)
@@ -447,6 +460,9 @@ def plan_go_wireless(snap: Snapshot, serial: str, slot: int,
     c = snap.controller(serial)
     if c is None or not c.usb:
         raise NotAllowed("Only a controller plugged in with USB can be switched to wireless here.")
+    if c.reversepuck:
+        raise NotAllowed("A ReversePuck stays plugged into the Steam Deck; it connects to its "
+                         "receivers from there.")
     if slot >= len(c.slots) or c.slots[slot].state != USED:
         raise NotAllowed("The %s is empty, so the controller would have nothing to connect to."
                          % sn(c, slot))
@@ -510,8 +526,9 @@ def plan_restore(snap: Snapshot, backup: dict, namer: Optional[Namer] = None) ->
             rec = bytes.fromhex(hexrec)
             if rec != c.slots[i].record:
                 pl.steps.append(WriteSlot(SlotRef(CONTROLLER, c.serial, i), rec))
-                pl.lines.append("%s, %s" % (n.controller(c.serial), slot_name(True, i)))
-                pl.after = "Restart the controller for its changes to take effect."
+                pl.lines.append("%s, %s" % (n.controller(c.serial), sn(c, i)))
+                if not c.reversepuck:
+                    pl.after = "Restart the controller for its changes to take effect."
     if pl.lines:
         pl.lines.insert(0, "These slots will be put back the way they were:")
     if missing:
@@ -535,10 +552,15 @@ def _iface_for(snap: Snapshot, ref: SlotRef):
     return c.iface
 
 
-def _read_back(ref: SlotRef, f) -> Optional[bytes]:
+def _reversepuck(snap: Snapshot, ref: SlotRef) -> bool:
+    c = snap.controller(ref.serial) if ref.kind == CONTROLLER else None
+    return bool(c and c.reversepuck)
+
+
+def _read_back(snap: Snapshot, ref: SlotRef, f) -> Optional[bytes]:
     if ref.kind == RECEIVER:
         return p.read_receiver_slot(f)
-    return p.read_controller_bond(f, ref.index)
+    return p.read_controller_bond(f, ref.index, reversepuck=_reversepuck(snap, ref))
 
 
 def execute(snap: Snapshot, pl: Plan, progress: Callable[[str], None] = lambda s: None,
@@ -585,27 +607,28 @@ def execute(snap: Snapshot, pl: Plan, progress: Callable[[str], None] = lambda s
             if step.ref.kind == RECEIVER:
                 p.write_receiver_slot(f, step.record)
             else:
-                p.write_controller_bond(f, step.ref.index, step.record)
+                p.write_controller_bond(f, step.ref.index, step.record,
+                                        reversepuck=_reversepuck(snap, step.ref))
         except OSError as e:
             if e.errno == errno.EPIPE:
                 raise ExecError("The %s refused the change to its %s, so nothing was changed "
-                                "there." % (step.ref.kind, _slot_of_ref(step.ref))) from e
+                                "there." % (step.ref.kind, _slot_of_ref(snap, step.ref))) from e
             raise ExecError("Writing the %s's %s failed: %s" %
-                            (step.ref.kind, _slot_of_ref(step.ref), e)) from e
+                            (step.ref.kind, _slot_of_ref(snap, step.ref), e)) from e
         if not verify:
             continue
         for _ in range(10):
-            got = _read_back(step.ref, f)
+            got = _read_back(snap, step.ref, f)
             if got is not None and _same(got, step.record):
                 break
             time.sleep(0.1)
         else:
             raise ExecError("The %s didn't keep the change to its %s (read back didn't match)." %
-                            (step.ref.kind, _slot_of_ref(step.ref)))
+                            (step.ref.kind, _slot_of_ref(snap, step.ref)))
 
 
-def _slot_of_ref(ref: SlotRef) -> str:
-    return slot_name(ref.kind == CONTROLLER, ref.index)
+def _slot_of_ref(snap: Snapshot, ref: SlotRef) -> str:
+    return slot_name(ref.kind == CONTROLLER, ref.index, _reversepuck(snap, ref))
 
 
 def combo(slot) -> str:

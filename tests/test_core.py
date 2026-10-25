@@ -7,7 +7,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sc_hammer import actions as a  # noqa: E402
 from sc_hammer import protocol as p  # noqa: E402
-from sc_hammer.fake import FakeTransport, demo_world  # noqa: E402
+from sc_hammer.describe import Names  # noqa: E402
+from sc_hammer.fake import FakeController, FakeTransport, demo_world  # noqa: E402
 from sc_hammer.hidraw import first_usage_page  # noqa: E402
 from sc_hammer.model import EMPTY, USED, Scanner  # noqa: E402
 from sc_hammer.store import Store  # noqa: E402
@@ -275,6 +276,71 @@ class DuplicateTest(unittest.TestCase):
         snap = self.scanner.scan()
         self.assertEqual(snap.receiver("MACHINE").slots[0].state, EMPTY)
         self.assertEqual(snap.receiver("PUCK").slots[0].state, EMPTY)
+
+
+class ReversePuckTest(Base):
+    """A ReversePuck (Steam Deck dongle) next to the demo's real controllers."""
+    RP = "FXA99602ABCDE"
+
+    def setUp(self):
+        self.world = demo_world()
+        self.rp = FakeController(self.RP, usb=True, reversepuck=True, bonds=[p.EMPTY_RECORD] * 8)
+        self.world.controllers.append(self.rp)
+        self.scanner = Scanner(FakeTransport(self.world))
+        self.snap = self.scanner.scan()
+
+    def test_recognised_with_all_slots(self):
+        rp = self.snap.controller(self.RP)
+        self.assertTrue(rp.reversepuck)
+        self.assertEqual(len(rp.slots), 8)
+        self.assertTrue(all(s.state == EMPTY for s in rp.slots))
+        self.assertIsNone(rp.active)
+        self.assertEqual(Names(Store(tempfile.mkdtemp()), self.snap).controller(self.RP),
+                         "ReversePuck ABCDE")
+        self.assertEqual(a.sn(rp, 5), "slot 6")
+        # the real controllers next to it are unchanged
+        usb = self.snap.controller(USB)
+        self.assertFalse(usb.reversepuck)
+        self.assertEqual(len(usb.slots), 2)
+        self.assertEqual(usb.active, 0)
+        self.assertEqual(a.sn(usb, 1), "left slot")
+
+    def test_pair_move_swap_erase(self):
+        pl = self.run_op(a.PAIR, a.SlotRef(C, self.RP, 5), a.SlotRef(R, LIVING, 3))
+        self.assertFalse(any(isinstance(s, a.RebootController) for s in pl.steps))
+        self.assertTrue(self.snap.controller(self.RP).usb)
+        key = self.rslot(LIVING, 3).key
+        self.assertEqual(self.cslot(self.RP, 5).key, key)
+        self.assertEqual(p.record_key(self.rp.bonds[5]), key)
+
+        self.run_op(a.MOVE, a.SlotRef(C, self.RP, 5), a.SlotRef(C, self.RP, 7))
+        self.assertEqual(self.cslot(self.RP, 7).key, key)
+        self.assertEqual(self.cslot(self.RP, 5).state, EMPTY)
+
+        self.run_op(a.PAIR, a.SlotRef(C, self.RP, 0), a.SlotRef(R, OFFICE, 1))
+        other = self.cslot(self.RP, 0).key
+        pl = self.run_op(a.SWAP, a.SlotRef(C, self.RP, 0), a.SlotRef(C, self.RP, 7))
+        self.assertEqual(pl.title, "Swap slots 1 and 8 of Controller FXA99602ABCDE?")
+        self.assertEqual((self.cslot(self.RP, 0).key, self.cslot(self.RP, 7).key), (key, other))
+
+        self.run_op(a.ERASE, a.SlotRef(C, self.RP, 0))
+        self.assertEqual(self.cslot(self.RP, 0).state, EMPTY)
+        self.assertIsNone(self.rp.bonds[0])
+        self.assertEqual(self.rslot(LIVING, 3).state, EMPTY)
+
+    def test_no_restart_or_wireless(self):
+        for fn in (lambda: a.plan_restart(self.snap, self.RP),
+                   lambda: a.plan_go_wireless(self.snap, self.RP, 0)):
+            with self.assertRaises(a.NotAllowed):
+                fn()
+
+    def test_old_firmware_is_a_plain_controller(self):
+        # ReversePuck firmware without rp/info echoes unknown settings back: read like before
+        self.rp.reversepuck = False
+        self.rp.bonds = [None, None]
+        snap = self.scanner.scan()
+        self.assertFalse(snap.controller(self.RP).reversepuck)
+        self.assertEqual(len(snap.controller(self.RP).slots), 2)
 
 
 class BackupTest(Base):

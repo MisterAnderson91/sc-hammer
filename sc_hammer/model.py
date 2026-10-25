@@ -12,6 +12,10 @@ from .transport import UsbDevice
 RECEIVER_PIDS = {0x1304: "Steam Controller Puck", 0x1305: "Steam Machine receiver"}
 # 0x1205 (Steam Deck built-in controls) has no wireless bonds and is left alone.
 CONTROLLER_PIDS = {0x1301, 0x1302, 0x1303}
+# A ReversePuck dongle (the Steam Deck as a Steam Controller) shows up as a wired controller; it says
+# what it is when asked (protocol.read_reversepuck_slots) and has numbered slots, not right/left.
+REVERSEPUCK_PID = 0x1302
+REVERSEPUCK_MAX_SLOTS = 16
 
 USED, EMPTY, UNKNOWN = "used", "empty", "unknown"
 
@@ -21,9 +25,9 @@ CONTROLLER_SLOT_NAMES = ("right slot", "left slot")
 CONTROLLER_SLOT_COMBOS = ("A + R1 + Steam", "A + L1 + Steam")
 
 
-def slot_name(is_controller: bool, index: int) -> str:
-    """"slot 3" on a receiver, "right slot" on a controller."""
-    if is_controller and index < len(CONTROLLER_SLOT_NAMES):
+def slot_name(is_controller: bool, index: int, reversepuck: bool = False) -> str:
+    """"slot 3" on a receiver or a ReversePuck, "right slot" on a controller."""
+    if is_controller and not reversepuck and index < len(CONTROLLER_SLOT_NAMES):
         return CONTROLLER_SLOT_NAMES[index]
     return "slot %d" % (index + 1)
 
@@ -94,6 +98,7 @@ class Controller:
     active: Optional[int] = None
     via: Optional[Tuple[str, int]] = None  # (receiver serial, slot) when wireless
     iface: Any = field(default=None, repr=False, compare=False)
+    reversepuck: bool = False  # a ReversePuck dongle: numbered slots, no active slot
 
 
 @dataclass
@@ -215,12 +220,24 @@ class Scanner:
         commit = p.read_string(f, 1, p.STRING_FIRMWARE_COMMIT)
         return slots, active, p.describe_firmware(attrs.get(p.ATTR_FIRMWARE_BUILD), commit)
 
+    def _read_reversepuck(self, f, count: int) -> List[ControllerSlot]:
+        # Every slot is live at once (the dongle connects to whichever puck is in range), so there's
+        # no active slot; and its firmware build is a stand-in, not worth showing.
+        return [ControllerSlot(i, p.read_controller_bond(f, i, reversepuck=True))
+                for i in range(min(count, REVERSEPUCK_MAX_SLOTS))]
+
     def _scan_usb_controller(self, dev: UsbDevice, snap: Snapshot) -> None:
         for info in dev.command_ifaces():
             f = self._open_iface(info.node)
             serial = p.read_string(f, 1, p.STRING_SERIAL)
             if not serial:
                 continue
+            rp_slots = p.read_reversepuck_slots(f) if dev.pid == REVERSEPUCK_PID else None
+            if rp_slots:
+                slots = self._read_reversepuck(f, rp_slots)
+                snap.controllers.append(Controller(serial, True, "", slots, None, None, f,
+                                                   reversepuck=True))
+                return
             slots, active, fw = self._read_controller(f, attempts=5)
             snap.controllers.append(Controller(serial, True, fw, slots, active, None, f))
             return

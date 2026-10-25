@@ -9,7 +9,7 @@ Parts of this file are adapted from OpenPuck's ReversePuck/scpair.py
 (https://github.com/safijari/openpuck), original code by safijari, Steam Machine, slot cloning
 and wireless controller support by Leseratte10, licensed AGPL-3.0. Modified for this project
 in 2026: restructured into standalone functions, echo/stall handling, bond deletion (0xF0),
-active-slot writes.
+active-slot writes, ReversePuck bond slots (rp/info, rp/bond/N).
 The command layout also follows OpenPuck's pairtui/pairtui.py and docs/PROTOCOL.md.
 """
 from __future__ import annotations
@@ -45,6 +45,12 @@ STRING_FIRMWARE_COMMIT = 3
 BOND_SETTINGS = ("esb/bond", "esb/bond_2")
 TRANSPORT_SETTING = "user/wireless_transport"
 TRANSPORT_TO_SLOT = {2: 0, 3: 1}
+
+# A ReversePuck (OpenPuck's Steam Deck dongle, also 28DE:1302) answers "rp/info" with
+# ['R']['P'][version][slot count] and keeps its bonds in "rp/bond/0", "rp/bond/1", ..., each written
+# to exactly that slot. A real controller has no such setting and answers it empty.
+RP_INFO_SETTING = "rp/info"
+RP_BOND_SETTING = "rp/bond/%d"
 
 # A bond record is [8-byte pairing key][16-byte ASCII serial of the other side]. The key is all
 # that matters for the radio link; the serial is only a label.
@@ -180,9 +186,23 @@ def read_setting(iface: Iface, name: str, attempts: int = 5) -> Optional[bytes]:
     return bytes(data)
 
 
-def read_controller_bond(iface: Iface, slot: int, attempts: int = 5) -> Optional[bytes]:
+def bond_setting(slot: int, reversepuck: bool = False) -> str:
+    """The setting a controller keeps bond slot `slot` in."""
+    return RP_BOND_SETTING % slot if reversepuck else BOND_SETTINGS[slot]
+
+
+def read_reversepuck_slots(iface: Iface, attempts: int = 2) -> Optional[int]:
+    """How many bond slots a ReversePuck has, or None if this isn't one."""
+    data = read_setting(iface, RP_INFO_SETTING, attempts)
+    if data and len(data) >= 4 and data[:2] == b"RP":
+        return data[3]
+    return None
+
+
+def read_controller_bond(iface: Iface, slot: int, attempts: int = 5,
+                         reversepuck: bool = False) -> Optional[bytes]:
     """24-byte record (zeros when empty), or None if the read failed."""
-    data = read_setting(iface, BOND_SETTINGS[slot], attempts)
+    data = read_setting(iface, bond_setting(slot, reversepuck), attempts)
     if data is None:
         return None
     rec = data[:RECORD_LEN]
@@ -204,10 +224,10 @@ def write_active_slot(iface: Iface, slot: int) -> None:
     iface.set_feature(1, CMD_SETTING_COMMIT, name)
 
 
-def write_controller_bond(iface: Iface, slot: int, rec: bytes) -> None:
+def write_controller_bond(iface: Iface, slot: int, rec: bytes, reversepuck: bool = False) -> None:
     """0xEE stages the setting, 0xEF commits it. An empty record deletes the setting (0xF0)
     instead: controllers stall (EPIPE) an 0xEE write of an all-zero bond."""
-    name = BOND_SETTINGS[slot].encode() + b"\x00"
+    name = bond_setting(slot, reversepuck).encode() + b"\x00"
     if not record_used(rec):
         iface.set_feature(1, CMD_SETTING_DELETE, name)
         return

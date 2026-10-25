@@ -80,13 +80,15 @@ def list_devices(transport) -> int:
                 print("  slot %d: %s" % (s.index + 1, s.state))
     for c in snap.controllers:
         how = "USB" if c.usb else "wireless via %s slot %d" % (c.via[0], c.via[1] + 1)
-        print("Controller %s (%s)  %s" % (c.serial, how, c.firmware))
+        print("%s %s (%s)  %s" % ("ReversePuck" if c.reversepuck else "Controller", c.serial, how,
+                                  c.firmware))
         for s in c.slots:
             mark = "  in use" if s.active else ""
+            name = slot_name(True, s.index, c.reversepuck)
             if s.state == "used":
-                print("  %s: %s  key %s%s" % (slot_name(True, s.index), s.name, s.key.hex(), mark))
+                print("  %s: %s  key %s%s" % (name, s.name, s.key.hex(), mark))
             else:
-                print("  %s: %s%s" % (slot_name(True, s.index), s.state, mark))
+                print("  %s: %s%s" % (name, s.state, mark))
     if not snap.receivers and not snap.controllers:
         print("No receivers or controllers found.")
     return 0
