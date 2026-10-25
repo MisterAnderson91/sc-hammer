@@ -1,6 +1,7 @@
 # Every push to main (or a test-* branch) that changes the app runs the tests (Linux and Windows),
-# builds the AppImage and the Windows .exe, and puts both in a draft release: "Preview build" for
-# main, "Preview build (<branch>)" for a test branch. Only people with write access can see drafts.
+# builds the AppImages and the Windows .exes (Intel/AMD and ARM each), and puts them in a draft
+# release: "Preview build" for main, "Preview build (<branch>)" for a test branch. Only people with
+# write access can see drafts.
 # Nothing is published; releasing is a separate, deliberate step: the Release workflow.
 name: Preview build
 
@@ -52,25 +53,46 @@ jobs:
 
   linux:
     needs: [test, version]
-    runs-on: ubuntu-latest
+    # Each AppImage is built and smoke-tested on its own architecture.
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.runner }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v7
       - name: Install squashfs-tools
         run: sudo apt-get update && sudo apt-get install -y squashfs-tools
       - name: Build the AppImage
         run: packaging/build-appimage.sh
+      - name: Smoke test the AppImage
+        # no FUSE on the runner, so let it unpack itself
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 ./dist/SC-Hammer-$ARCH.AppImage --version
+          APPIMAGE_EXTRACT_AND_RUN=1 ./dist/SC-Hammer-$ARCH.AppImage --demo --list | tee out.txt
+          grep -q "Steam Controller Puck" out.txt
       - uses: actions/upload-artifact@v7
         with:
-          name: appimage
+          name: appimage-${{ matrix.arch }}
           path: dist/*.AppImage
 
   windows:
     needs: [test, version]
-    runs-on: windows-latest
+    # Each .exe is built by a native Python on its own architecture: PyInstaller
+    # can't cross-build.
+    strategy:
+      matrix:
+        include:
+          - { runner: windows-latest, arch: x64 }
+          - { runner: windows-11-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      EXE: dist/SC-Hammer-${{ needs.version.outputs.version }}-windows-${{ matrix.arch }}.exe
     defaults:
       run:
         shell: bash
@@ -79,19 +101,20 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          architecture: ${{ matrix.arch }}
       - name: Build the .exe
         run: |
           python -m pip install pyinstaller
           python packaging/build_windows.py
       - name: Smoke test the .exe
         run: |
-          ./dist/SC-Hammer-$VERSION-windows-x64.exe --demo --list | tee out.txt
+          ./$EXE --demo --list | tee out.txt
           grep -q "Steam Controller Puck" out.txt
-          ./dist/SC-Hammer-$VERSION-windows-x64.exe --diagnose | tee diag.txt
+          ./$EXE --diagnose | tee diag.txt
           grep -q "Raw HID collections" diag.txt
       - uses: actions/upload-artifact@v7
         with:
-          name: windows
+          name: windows-${{ matrix.arch }}
           path: dist/*.exe
 
   publish:
@@ -122,7 +145,9 @@ jobs:
           python3 .github/scripts/release_notes.py --preview --branch "${{ github.ref_name }}" \
             --version "$VERSION" \
             --asset "dist/SC-Hammer-x86_64.AppImage" \
-            --asset "dist/SC-Hammer-$VERSION-windows-x64.exe" > notes.md
+            --asset "dist/SC-Hammer-aarch64.AppImage" \
+            --asset "dist/SC-Hammer-$VERSION-windows-x64.exe" \
+            --asset "dist/SC-Hammer-$VERSION-windows-arm64.exe" > notes.md
       - name: Replace this branch's preview draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,4 +157,5 @@ jobs:
             | while read -r tag; do gh release delete "$tag" --yes; done
           gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "$TITLE" \
             --notes-file notes.md "dist/SC-Hammer-x86_64.AppImage" \
-            "dist/SC-Hammer-$VERSION-windows-x64.exe"
+            "dist/SC-Hammer-aarch64.AppImage" "dist/SC-Hammer-$VERSION-windows-x64.exe" \
+            "dist/SC-Hammer-$VERSION-windows-arm64.exe"

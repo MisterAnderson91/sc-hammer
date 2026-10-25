@@ -98,6 +98,18 @@ def sha256(path):
     return h.hexdigest()
 
 
+def arch_of(name: str) -> str:
+    """Which computers a file is for, from its name."""
+    return "ARM" if re.search(r"(aarch64|arm64)", name) else "Intel/AMD"
+
+
+def pick(files) -> str:
+    """**`a`** for one file; for several, which one to take on which computer."""
+    if len(files) == 1:
+        return "**`%s`**" % files[0]
+    return " or ".join("**`%s`** (%s)" % (f, arch_of(f)) for f in files)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", required=True)
@@ -112,8 +124,8 @@ def main():
     prev = args.prev_tag or last_tag()
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     names = [os.path.basename(a) for a in args.asset]
-    appimage = next((n for n in names if n.endswith(".AppImage")), None)
-    exe = next((n for n in names if n.endswith(".exe")), None)
+    appimages = [n for n in names if n.endswith(".AppImage")]
+    exes = [n for n in names if n.endswith(".exe")]
     out = []
 
     if args.preview:
@@ -149,17 +161,17 @@ def main():
             out += ["### %s" % tag, "", body, ""]
 
     out += ["## Install", ""]
-    if appimage:
+    if appimages:
         out += [
-            "**Linux / SteamOS:** download **`%s`**, make it executable (right-click → Properties → "
-            "Permissions → *Is executable*, or `chmod +x %s`), then double-click it. On SteamOS, "
+            "**Linux / SteamOS:** download %s, make it executable (right-click → Properties → "
+            "Permissions → *Is executable*, or `chmod +x` it), then double-click it. On SteamOS, "
             "use Desktop Mode (or add it as a non-Steam game). No sudo needed; if a receiver or "
-            "controller doesn't show up, run it once with `--check`." % (appimage, appimage), ""]
-    if exe:
+            "controller doesn't show up, run it once with `--check`." % pick(appimages), ""]
+    if exes:
         out += [
-            "**Windows 10/11:** download **`%s`** and double-click it. Nothing to install. Windows "
+            "**Windows 10/11:** download %s and double-click it. Nothing to install. Windows "
             "may say *\"Windows protected your PC\"* because the app isn't code-signed: click "
-            "**More info → Run anyway**." % exe, ""]
+            "**More info → Run anyway**." % pick(exes), ""]
     out += [
         "## Upgrading",
         "",

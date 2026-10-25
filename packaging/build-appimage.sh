@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Builds dist/SC-Hammer-x86_64.AppImage (the version is stamped inside, not in the file name, so
-# a Steam shortcut or desktop entry pointing at it keeps working after an update).
+# Builds dist/SC-Hammer-<arch>.AppImage: ARCH=x86_64 (the default) or ARCH=aarch64. The version is
+# stamped inside, not in the file name, so a Steam shortcut or desktop entry pointing at it keeps
+# working after an update.
 #
 # The AppImage is a prebuilt portable Python with Tk (python-appimage, manylinux2014) plus this
 # app, packed as squashfs behind the standard AppImage type-2 runtime. Works on macOS or Linux:
 #   - with squashfs-tools installed (mksquashfs/unsquashfs; `brew install squashfs` on macOS)
-#   - or on x86_64 Linux without them, using appimagetool instead (e.g. on a Steam Deck).
+#   - or on Linux of the same architecture without them, using appimagetool (e.g. on a Steam Deck).
+# Either architecture can be packed on any machine; only the appimagetool fallback runs a binary.
 # Needs curl and python3. Downloads are cached in build/cache.
 set -euo pipefail
 
@@ -15,13 +17,18 @@ CACHE="$BUILD/cache"
 APPDIR="$BUILD/AppDir"
 DIST="$ROOT/dist"
 
-PY_URL="${PY_URL:-https://github.com/niess/python-appimage/releases/download/python3.12/python3.12.15-cp312-cp312-manylinux2014_x86_64.AppImage}"
-RUNTIME_URL="${RUNTIME_URL:-https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64}"
-TOOL_URL="${TOOL_URL:-https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage}"
+ARCH="${ARCH:-x86_64}"
+case "$ARCH" in
+	x86_64 | aarch64) ;;
+	*) echo "ARCH must be x86_64 or aarch64, not '$ARCH'." >&2; exit 2 ;;
+esac
+PY_URL="${PY_URL:-https://github.com/niess/python-appimage/releases/download/python3.12/python3.12.15-cp312-cp312-manylinux2014_$ARCH.AppImage}"
+RUNTIME_URL="${RUNTIME_URL:-https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$ARCH}"
+TOOL_URL="${TOOL_URL:-https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$ARCH.AppImage}"
 
 # VERSION can be set by the release workflow; otherwise it's the one in sc_hammer/__init__.py.
 VERSION="${VERSION:-$(python3 -c "import sys; sys.path.insert(0, '$ROOT'); import sc_hammer as m; print(m.__version__)")}"
-OUT="$DIST/SC-Hammer-x86_64.AppImage"
+OUT="$DIST/SC-Hammer-$ARCH.AppImage"
 
 fetch() {
 	local url="$1" dest="$CACHE/$(basename "$1")"
@@ -103,7 +110,7 @@ if have_squashfs; then
 else
 	TOOL="$(fetch "$TOOL_URL")"
 	chmod +x "$TOOL"
-	ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 "$TOOL" --no-appstream "$APPDIR" "$OUT"
+	ARCH="$ARCH" APPIMAGE_EXTRACT_AND_RUN=1 "$TOOL" --no-appstream "$APPDIR" "$OUT"
 fi
 chmod 755 "$OUT"
 echo "Built $OUT ($(du -h "$OUT" | cut -f1))"

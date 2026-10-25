@@ -50,7 +50,7 @@ Get it from the [Releases](../../releases) page.
 
 ### Linux / SteamOS
 
-1. Download `SC-Hammer-x86_64.AppImage`.
+1. Download `SC-Hammer-x86_64.AppImage` (or `SC-Hammer-aarch64.AppImage` on an ARM computer).
 2. Make it executable: right-click it → **Properties** → **Permissions** → **Is executable**, or in a
    terminal:
    ```bash
@@ -65,7 +65,7 @@ On a Steam Deck or Steam Machine, run it from **Desktop Mode**. To use it from G
 
 ### Windows 10/11
 
-1. Download `SC-Hammer-…-windows-x64.exe`.
+1. Download `SC-Hammer-…-windows-x64.exe` (or `…-windows-arm64.exe` on a Windows on ARM PC).
 2. Double-click it. There's nothing to install; it unpacks itself each time it starts, which takes a moment.
 
 Windows may say *"Windows protected your PC"* the first time, because the app isn't code-signed. Click
@@ -140,11 +140,12 @@ The app is plain Python 3.9+ with Tk and no other dependencies.
 make demo        # run from source with pretend devices (needs python3 with tkinter)
 make run         # run from source against real devices (Linux)
 make test        # unit tests, run against simulated devices
-make appimage    # build dist/SC-Hammer-x86_64.AppImage
+make appimage    # build dist/SC-Hammer-x86_64.AppImage (ARCH=aarch64 for ARM)
 ```
 
 On Windows, `pip install pyinstaller` then `python packaging/build_windows.py` builds
-`dist/SC-Hammer-<version>-windows-x64.exe`: one file with Python, Tk and the app inside.
+`dist/SC-Hammer-<version>-windows-x64.exe` (`-arm64` when run with an ARM64 Python): one file
+with Python, Tk and the app inside.
 
 `make appimage` works on Linux or macOS. It downloads a portable Python with Tk
 ([python-appimage](https://github.com/niess/python-appimage)) and the AppImage
