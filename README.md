@@ -15,7 +15,6 @@ It works with:
 - **Steam Controller Pucks** (the USB receiver for the Steam Controller 2)
 - the receiver built into a **Steam Machine**
 - **[OpenPuck](https://github.com/safijari/openpuck)** receivers in Steam mode
-- **ReversePuck** dongles (OpenPuck's Steam Deck as a Steam Controller), with all 8 of their slots
 
 Any number of receivers and controllers can be connected at once. It runs on **Linux** (including SteamOS)
 and **Windows 10/11**.
@@ -24,8 +23,7 @@ and **Windows 10/11**.
 
 A receiver remembers up to **4 controllers** (slots 1–4), and a controller remembers up to **2 receivers**
 (its **right** and **left** slots, as Steam calls them; turning it on with **A + R1 + Steam** uses the right slot,
-**A + L1 + Steam** the left). A **ReversePuck** remembers up to **8 receivers** (slots 1–8) and connects to
-whichever one is in range, so it has no "in use" slot. Click a slot, then:
+**A + L1 + Steam** the left). Click a slot, then:
 
 | Action | What it does |
 |---|---|
@@ -121,9 +119,6 @@ The app shows the same instructions under **Fix permissions** when it can't open
 - **"In use"** marks the slot a controller is currently using.
 - **OpenPuck** must be in Steam mode to show up (Xbox, PlayStation and the other modes hide the pairing
   interface).
-- A **ReversePuck** shows up while it's plugged in with USB (into the Steam Deck, or any computer). Its
-  changes take effect straight away, so it has no Restart or Go wireless. It needs ReversePuck firmware
-  that supports slot management; older firmware shows it as an ordinary controller with two slots.
 - Controllers connected over **Bluetooth** don't show up.
 - If Steam is busy talking to a device at the same moment, a read can fail. The slot then says
   "Couldn't read this slot". Click **Refresh**.
