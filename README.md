@@ -50,11 +50,11 @@ Get it from the [Releases](../../releases) page.
 
 ### Linux / SteamOS
 
-1. Download `SC-Hammer-…-x86_64.AppImage`.
+1. Download `SC-Hammer-x86_64.AppImage`.
 2. Make it executable: right-click it → **Properties** → **Permissions** → **Is executable**, or in a
    terminal:
    ```bash
-   chmod +x SC-Hammer-*-x86_64.AppImage
+   chmod +x SC-Hammer-x86_64.AppImage
    ```
 3. Double-click it.
 
@@ -74,7 +74,7 @@ Windows may say *"Windows protected your PC"* the first time, because the app is
 ### Try it without hardware
 
 ```bash
-./SC-Hammer-*-x86_64.AppImage --demo          # Linux
+./SC-Hammer-x86_64.AppImage --demo            # Linux
 SC-Hammer-*-windows-x64.exe --demo            # Windows
 ```
 
@@ -92,7 +92,7 @@ the logged-in user is normally allowed to open Valve devices, because Steam's de
 To check, plug in your receiver(s) and controller(s) and run:
 
 ```bash
-./SC-Hammer-*-x86_64.AppImage --check
+./SC-Hammer-x86_64.AppImage --check
 ```
 
 If it reports `PERMISSION DENIED`, add the same rule Steam uses, then unplug and replug the devices:
@@ -140,7 +140,7 @@ The app is plain Python 3.9+ with Tk and no other dependencies.
 make demo        # run from source with pretend devices (needs python3 with tkinter)
 make run         # run from source against real devices (Linux)
 make test        # unit tests, run against simulated devices
-make appimage    # build dist/SC-Hammer-<version>-x86_64.AppImage
+make appimage    # build dist/SC-Hammer-x86_64.AppImage
 ```
 
 On Windows, `pip install pyinstaller` then `python packaging/build_windows.py` builds

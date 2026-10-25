@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds dist/SC-Hammer-<version>-x86_64.AppImage.
+# Builds dist/SC-Hammer-x86_64.AppImage (the version is stamped inside, not in the file name, so
+# a Steam shortcut or desktop entry pointing at it keeps working after an update).
 #
 # The AppImage is a prebuilt portable Python with Tk (python-appimage, manylinux2014) plus this
 # app, packed as squashfs behind the standard AppImage type-2 runtime. Works on macOS or Linux:
@@ -20,7 +21,7 @@ TOOL_URL="${TOOL_URL:-https://github.com/AppImage/appimagetool/releases/download
 
 # VERSION can be set by the release workflow; otherwise it's the one in sc_hammer/__init__.py.
 VERSION="${VERSION:-$(python3 -c "import sys; sys.path.insert(0, '$ROOT'); import sc_hammer as m; print(m.__version__)")}"
-OUT="$DIST/SC-Hammer-$VERSION-x86_64.AppImage"
+OUT="$DIST/SC-Hammer-x86_64.AppImage"
 
 fetch() {
 	local url="$1" dest="$CACHE/$(basename "$1")"
