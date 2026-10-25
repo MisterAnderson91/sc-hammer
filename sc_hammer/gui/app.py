@@ -8,10 +8,12 @@ import sys
 import tempfile
 import threading
 import tkinter as tk
+import webbrowser
 from typing import Callable, Dict, List, Optional
 
 from .. import APP_NAME, TAGLINE, __version__
 from .. import actions as a
+from .. import updates
 from ..describe import Describer, Names
 from ..model import (CONTROLLER_SLOT_COMBOS, UNKNOWN, USED, Controller, Problem, Receiver,
                      Scanner, Snapshot, slot_name)
@@ -142,8 +144,11 @@ class App:
         self.rows: Dict[a.SlotRef, SlotRow] = {}
         self.signature = None
         self._status_job = None
+        self.update_version: Optional[str] = None  # a newer release, once the check finds one
         self._build()
         self.root.after(40, self._poll_worker)
+        if updates.claim_check(__version__):  # once per run
+            threading.Thread(target=self._check_for_update, daemon=True).start()
         if self.scanner:
             self.refresh()
             self.root.after(1500, self._watch_hotplug)
@@ -408,12 +413,17 @@ class App:
             items.insert(0, Problem("Running as root",
                                     "That isn't needed and can cause trouble. Start the app "
                                     "normally."))
+        if self.update_version:
+            items.append(Problem("SC Hammer %s is available" % self.update_version,
+                                 "You have %s. Download the new version from GitHub." % __version__,
+                                 "update"))
         f = self.fonts
         for p in items:
-            box = tk.Frame(self.banner, bg=C["warn_bg"] if p.kind != "info" else C["banner"],
+            calm = p.kind in ("info", "update")
+            box = tk.Frame(self.banner, bg=C["banner"] if calm else C["warn_bg"],
                            padx=f.px(16), pady=f.px(10))
             box.pack(fill="x", padx=f.px(20), pady=(f.px(12), 0))
-            fg = C["warn"] if p.kind != "info" else C["text"]
+            fg = C["text"] if calm else C["warn"]
             tk.Label(box, text=p.title, bg=box.cget("bg"), fg=fg, font=f["bold"],
                      anchor="w").grid(row=0, column=0, sticky="w")
             auto_wrap(tk.Label(box, text=p.detail, bg=box.cget("bg"), fg=C["muted"],
@@ -426,6 +436,9 @@ class App:
             elif p.kind == "nolinux":
                 Button(box, f, "Try the demo", self.switch_to_demo, "primary",
                        bg=box.cget("bg")).grid(row=0, column=1, rowspan=2)
+            elif p.kind == "update":
+                Button(box, f, "Download", lambda: webbrowser.open(updates.RELEASES_PAGE),
+                       "primary", bg=box.cget("bg")).grid(row=0, column=1, rowspan=2)
 
     # ---------- action bar ----------
 
@@ -797,6 +810,17 @@ class App:
         except queue.Empty:
             pass
         self.root.after(40, self._poll_worker)
+
+    def _check_for_update(self) -> None:
+        # Its own thread, not the Worker: a slow network must never hold up device jobs. The result
+        # goes through the Worker's results queue so it's handled on the UI thread.
+        v = updates.newer_release(__version__)
+        if v:
+            self.worker.results.put((self._on_update, v))
+
+    def _on_update(self, version: str) -> None:
+        self.update_version = version
+        self._render_banner()
 
     def _watch_hotplug(self) -> None:
         try:

@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sc_hammer import actions as a  # noqa: E402
 from sc_hammer import protocol as p  # noqa: E402
+from sc_hammer import updates  # noqa: E402
 from sc_hammer.describe import Names  # noqa: E402
 from sc_hammer.fake import FakeController, FakeTransport, demo_world  # noqa: E402
 from sc_hammer.hidraw import first_usage_page  # noqa: E402
@@ -341,6 +342,46 @@ class ReversePuckTest(Base):
         snap = self.scanner.scan()
         self.assertFalse(snap.controller(self.RP).reversepuck)
         self.assertEqual(len(snap.controller(self.RP).slots), 2)
+
+
+class UpdatesTest(unittest.TestCase):
+    def setUp(self):
+        updates._claimed = False
+        self.saved = os.environ.pop("APPIMAGE", None)
+
+    def tearDown(self):
+        updates._claimed = False
+        os.environ.pop("APPIMAGE", None)
+        if self.saved is not None:
+            os.environ["APPIMAGE"] = self.saved
+
+    def test_versions(self):
+        self.assertEqual(updates.parse_version("v0.1.12"), (0, 1, 12))
+        self.assertIsNone(updates.parse_version("0.1.0-preview.2f7e455"))
+
+    def test_only_release_builds_check_once(self):
+        self.assertFalse(updates.claim_check("0.1.1"))  # from source
+        os.environ["APPIMAGE"] = "/tmp/SC-Hammer-x86_64.AppImage"
+        self.assertFalse(updates.claim_check("0.1.0-preview.2f7e455"))
+        self.assertTrue(updates.claim_check("0.1.1"))
+        self.assertFalse(updates.claim_check("0.1.1"))  # once per run
+
+    def test_newer_release(self):
+        import io
+        import json
+        from unittest import mock
+
+        def latest(tag):
+            body = io.BytesIO(json.dumps({"tag_name": tag}).encode())
+            return mock.patch("urllib.request.urlopen", return_value=mock.MagicMock(
+                __enter__=lambda s: body, __exit__=lambda s, *e: False))
+        with latest("v0.2.0"):
+            self.assertEqual(updates.newer_release("0.1.1"), "0.2.0")
+        for tag in ("v0.1.1", "v0.1.0"):
+            with latest(tag):
+                self.assertIsNone(updates.newer_release("0.1.1"))
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("offline")):
+            self.assertIsNone(updates.newer_release("0.1.1"))
 
 
 class BackupTest(Base):
