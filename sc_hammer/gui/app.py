@@ -917,7 +917,7 @@ def desktop_scale() -> float:
 def run(transport, demo: bool = False, zoom: Optional[float] = None) -> None:
     scale = desktop_scale()
     root = tk.Tk(className="sc-hammer")
-    root.title(APP_NAME + (" (demo)" if demo else ""))
+    root.title("%s %s%s" % (APP_NAME, __version__, " (demo)" if demo else ""))
     if sys.platform.startswith("linux") or sys.platform == "win32":
         # Keep Tk's own point-sized defaults (menus, dialogs) at the desktop's scale too.
         root.tk.call("tk", "scaling", 96 * scale / 72)
